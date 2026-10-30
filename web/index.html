@@ -61,7 +61,7 @@
         <label for="preset">Models
           <select id="preset">
             <option value="light">Light: about 220 MB, fastest</option>
-            <option value="balanced">Balanced: about 450 MB, better Arabic</option>
+            <option value="balanced">Balanced: about 450 MB, better Arabic (computers only)</option>
           </select>
         </label>
         <label for="device">Engine
@@ -71,7 +71,7 @@
           </select>
         </label>
       </div>
-      <p class="hint">Models download once on first use and are cached by the browser.</p>
+      <p class="hint">Models download once on first use and are cached by the browser. On phones use Light: Balanced needs more memory than phone browsers give a page.</p>
 
       <details class="field">
         <summary>My voice <span id="voice-count" class="muted"></span></summary>
@@ -99,6 +99,7 @@
 
       <button id="run" class="button primary" type="button" disabled>Transcribe</button>
       <p id="run-hint" class="hint">Record or choose audio first.</p>
+      <p id="last-run" class="warn-note" hidden></p>
     </section>
 
     <section id="progress" class="panel" aria-live="polite" hidden>

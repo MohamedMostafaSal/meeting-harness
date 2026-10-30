@@ -234,6 +234,7 @@ async function runStaged() {
   const step = async (label, message) => {
     phase = `${label} · `;
     state.diag.step = label;
+    breadcrumb({ status: 'running', step: label, stage: 'starting' });
     try {
       const out = await runTask(message);
       if (out.ctx) mergeContext(ctx, out.ctx);
@@ -258,6 +259,7 @@ async function runStaged() {
     Object.assign(texts, e.texts);
   }
   state.diag.step = 'done';
+  breadcrumb({ status: 'done' });
   return assemble({ ...options, utterances: d.utterances, pieces: p.pieces, texts, duration: audio.length / SAMPLE_RATE }, ctx);
 }
 
@@ -278,6 +280,7 @@ function showProgress(on) {
 }
 
 function showStage({ stage, done, total }) {
+  if (!done) breadcrumb({ stage });
   $('stage').textContent = phase + (total ? `${stage}: ${done + 1} of ${total}` : stage);
   if (total) $('stage-bar').value = done / total;
   else $('stage-bar').removeAttribute('value');
@@ -454,6 +457,37 @@ $('score').addEventListener('click', () => {
   const c = characterErrorRate(reference, hypothesis);
   $('score-out').textContent = `Word error rate ${(w.rate * 100).toFixed(1)}% (${w.errors}/${w.referenceLength}) · Character error rate ${(c.rate * 100).toFixed(1)}%`;
 });
+
+// MARK: - Crash breadcrumb
+//
+// When a browser runs out of memory it kills the tab, and nothing on the page
+// survives to report it. The page notes each step before starting it, so the
+// next load can say where the last run stopped.
+
+const LAST_RUN_KEY = 'meeting-harness.last-run';
+
+function breadcrumb(update) {
+  try {
+    const previous = update.status === 'running' ? {} : JSON.parse(localStorage.getItem(LAST_RUN_KEY) ?? '{}');
+    const settingsNow = { ...settings(), seconds: state.audio ? +(state.audio.length / SAMPLE_RATE).toFixed(1) : null };
+    localStorage.setItem(LAST_RUN_KEY, JSON.stringify({ ...previous, ...settingsNow, ...update, at: new Date().toISOString() }));
+  } catch { /* storage unavailable: no breadcrumb */ }
+}
+
+(function reportLastRun() {
+  let last;
+  try { last = JSON.parse(localStorage.getItem(LAST_RUN_KEY) ?? 'null'); } catch { return; }
+  if (last?.status !== 'running') return;
+  state.diag.previousRun = last;
+  $('last-run').textContent =
+    `The last run stopped during ${last.step} (${last.stage}) with ${last.preset} models on ${last.seconds ?? '?'} s of audio. ` +
+    'The browser most likely ran out of memory and closed the page. Use Light models or a shorter recording, ' +
+    'and tap Copy diagnostics below to report it.';
+  $('last-run').hidden = false;
+  $('error-text').textContent = 'Previous run crashed.';
+  $('error').hidden = false;
+  breadcrumb({ status: 'reported' });
+})();
 
 // MARK: - Errors
 
