@@ -1,0 +1,36 @@
+# XcodeGen project for building a runnable .app from the MeetingHarness package
+# (simulator screenshots, local Xcode runs). xtool doesn't need this file.
+name: Harness
+options:
+  bundleIdPrefix: io.github.mohamedmostafasal
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  MeetingHarnessApp:
+    path: .
+targets:
+  Harness:
+    type: application
+    platform: iOS
+    sources: [AppHost]
+    dependencies:
+      - package: MeetingHarnessApp
+        product: MeetingHarness
+    info:
+      path: AppHost/Info.plist
+      properties:
+        CFBundleDisplayName: Harness
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        NSMicrophoneUsageDescription: Harness records meetings so it can transcribe them on this iPhone. Audio never leaves your phone unless you share it.
+        UIBackgroundModes: [audio]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mohamedmostafasal.meetingharness
+        CODE_SIGNING_ALLOWED: "NO"
+        SWIFT_VERSION: "5.0"

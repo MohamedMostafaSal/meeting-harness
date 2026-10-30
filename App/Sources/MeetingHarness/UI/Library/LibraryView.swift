@@ -10,6 +10,7 @@ struct LibraryView: View {
     @State private var importing = false
     @State private var pendingDelete: Meeting?
     @State private var importError: String?
+    @State private var showModels = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -40,6 +41,8 @@ struct LibraryView: View {
                 RecordingView { id in path = [id] }
             }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showModels) { NavigationStack { ModelsView() } }
+            .task { openLaunchScreen() }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.audio, .mpeg4Audio, .mp3, .wav]) { result in
                 importAudio(result)
             }
@@ -85,6 +88,17 @@ struct LibraryView: View {
             else if calendar.isDateInYesterday(day) { title = "Yesterday" }
             else { title = day.formatted(.dateTime.weekday(.wide).day().month(.wide)) }
             return (title, grouped[day]!.sorted { $0.createdAt > $1.createdAt })
+        }
+    }
+
+    /// `-screen <name>` opens a screen directly (screenshots, demos).
+    private func openLaunchScreen() {
+        switch LaunchOptions.screen {
+        case "meeting": path = [DemoData.standupID]
+        case "recording": recording = true
+        case "settings": showSettings = true
+        case "models": showModels = true
+        default: break
         }
     }
 

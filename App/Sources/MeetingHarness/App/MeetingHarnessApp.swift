@@ -27,6 +27,10 @@ final class AppModel {
 
     init() {
         transcription = TranscriptionService(store: store, models: models, settings: settings, voices: voices)
+        if LaunchOptions.demo {
+            DemoData.seed(store)
+            settings.onboarded = LaunchOptions.screen != "onboarding"
+        }
     }
 
     /// Transcribes everything that was waiting for models once they're downloaded.

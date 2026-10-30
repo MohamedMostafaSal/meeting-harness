@@ -1,6 +1,7 @@
+import HarnessCore
 import SwiftUI
 
-/// Full-screen recording: a big clock, a live level meter, and three clear actions.
+/// Full-screen recording: a clock, a live level meter, live captions, and three clear actions.
 struct RecordingView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -9,33 +10,38 @@ struct RecordingView: View {
     @State private var error: String?
     @State private var confirmDiscard = false
     @State private var started = false
+    @State private var captioner: LiveCaptioner?
 
     private var recorder: Recorder { app.recorder }
+    private var demo: Bool { LaunchOptions.demo }
+    private var isRecording: Bool { demo || recorder.state == .recording }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Spacer()
-            Text(clockString(recorder.elapsed))
-                .font(.system(size: 76, weight: .thin, design: .rounded).monospacedDigit())
+            Text(clockString(demo ? 754 : recorder.elapsed))
+                .font(.system(size: 64, weight: .thin, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white)
                 .contentTransition(.numericText())
-                .accessibilityLabel("Recorded \(durationString(recorder.elapsed))")
-            LevelMeter(levels: recorder.levels, active: recorder.state == .recording)
-                .frame(height: 96)
-                .padding(.horizontal, 24)
                 .padding(.top, 28)
+                .accessibilityLabel("Recorded \(durationString(recorder.elapsed))")
+            LevelMeter(levels: demo ? Self.demoLevels : recorder.levels, active: isRecording)
+                .frame(height: 72)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            captions
+                .padding(.top, 24)
             if recorder.interrupted {
                 Text("Paused by a call or another app. Tap resume when you're ready.")
                     .font(.footnote)
                     .foregroundStyle(Theme.warn)
                     .multilineTextAlignment(.center)
-                    .padding(.top, 16)
                     .padding(.horizontal, 32)
+                    .padding(.bottom, 8)
             }
-            Spacer()
             controls
-                .padding(.bottom, 32)
+                .padding(.top, 12)
+                .padding(.bottom, 28)
         }
         .background(Theme.night.ignoresSafeArea())
         .preferredColorScheme(.dark)
@@ -47,6 +53,7 @@ struct RecordingView: View {
         }
         .confirmationDialog("Discard this recording?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) {
+                Task { await captioner?.stop() }
                 recorder.discard()
                 dismiss()
             }
@@ -56,7 +63,7 @@ struct RecordingView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(recorder.state == .recording ? Theme.record : .gray)
+                .fill(isRecording ? Theme.record : .gray)
                 .frame(width: 10, height: 10)
             Text(recorder.state == .paused ? "Paused" : "Recording")
                 .font(.subheadline.weight(.semibold))
@@ -68,6 +75,44 @@ struct RecordingView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
+    }
+
+    /// Live captions, newest at the bottom; the sentence still being spoken is dimmed.
+    private var captions: some View {
+        ScrollViewReader { scroller in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let captioner, !(captioner.lines.isEmpty && captioner.draft == nil) {
+                        ForEach(captioner.lines) { line in
+                            CaptionLine(caption: line, isDraft: false)
+                        }
+                        if let draft = captioner.draft {
+                            CaptionLine(caption: draft, isDraft: true).id("draft")
+                        }
+                    } else {
+                        Text(captionHint)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 24)
+                    }
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .padding(.horizontal, 24)
+            }
+            .scrollIndicators(.hidden)
+            .mask(LinearGradient(colors: [.clear, .black, .black], startPoint: .top, endPoint: .init(x: 0.5, y: 0.25)))
+            .onChange(of: captioner?.lines.count) { withAnimation { scroller.scrollTo("end") } }
+            .onChange(of: captioner?.draft?.text) { withAnimation { scroller.scrollTo("end") } }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var captionHint: String {
+        app.models.isReady(.multilingual)
+            ? "Live captions appear as people speak. The full transcript, with speakers, is made when you stop."
+            : "Live captions need the Language detection model (Settings › Models). The full transcript is made when you stop."
     }
 
     private var controls: some View {
@@ -97,18 +142,41 @@ struct RecordingView: View {
     private func begin() async {
         guard !started else { return }
         started = true
+        if demo {
+            let demoCaptioner = makeCaptioner()
+            demoCaptioner?.showDemo(DemoData.liveCaptions, draft: "طيب، خلينا نشوف الـ")
+            captioner = demoCaptioner
+            return
+        }
         guard await recorder.requestPermission() else {
             error = "Allow microphone access in Settings › Harness › Microphone, then try again."
             return
         }
         do {
             try recorder.start()
+            captioner = makeCaptioner()
+            captioner?.start()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
+    /// Live captions run on the small multilingual model, if it's downloaded.
+    private func makeCaptioner() -> LiveCaptioner? {
+        let folder = app.models.folder(for: .multilingual)
+        if folder == nil && !demo { return nil }
+        let model = WhisperModel(folder: folder ?? URL(fileURLWithPath: "/dev/null"))
+        return LiveCaptioner(
+            buffer: recorder.live,
+            languageID: WhisperLanguageID(model: model, allowed: app.settings.languages),
+            recognizer: WhisperRecognizer(
+                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-base", version: "coreml"), languages: [], isMultilingual: true),
+                model: model, forcesLanguage: true))
+    }
+
     private func finish() {
+        if demo { dismiss(); return }
+        Task { await captioner?.stop() }
         guard let result = recorder.stop() else { dismiss(); return }
         do {
             let meeting = try app.store.add(audioAt: result.url, duration: result.duration, move: true)
@@ -118,6 +186,27 @@ struct RecordingView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private static let demoLevels: [Float] = (0..<48).map { i in
+        let x = Float(i)
+        return max(0.05, 0.45 + 0.35 * sin(x * 0.7) * cos(x * 0.23) + (i > 40 ? 0.2 : 0))
+    }
+}
+
+/// One caption line, in its language's reading direction.
+struct CaptionLine: View {
+    var caption: LiveCaptioner.Caption
+    var isDraft: Bool
+
+    var body: some View {
+        Text(caption.text)
+            .font(caption.language == "ar" ? .system(size: 22, weight: .medium) : .system(size: 20, weight: .medium))
+            .lineSpacing(caption.language == "ar" ? 6 : 3)
+            .foregroundStyle(.white.opacity(isDraft ? 0.5 : 0.95))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.layoutDirection, layoutDirection(for: caption.language))
+            .transition(.opacity)
     }
 }
 
