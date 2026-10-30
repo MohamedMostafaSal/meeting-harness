@@ -46,7 +46,7 @@ check(lid[0].language === 'en' && lid[0].confidence > 0.9, 'language ID picks En
 
 const t1 = Date.now();
 const { transcript, log, timings } = await runPipeline(audio, models, {
-  policy: DEFAULT_POLICY, allowedLanguages: ['en', 'ar'], meeting: 'smoke',
+  policy: DEFAULT_POLICY, allowedLanguages: ['en', 'ar'], meeting: 'smoke', debug: true,
 });
 console.log(`pipeline ran in ${((Date.now() - t1) / 1000).toFixed(1)} s for ${(audio.length / SAMPLE_RATE).toFixed(1)} s of audio`);
 console.log(log.join('\n'));

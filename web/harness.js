@@ -13,10 +13,9 @@ export const DEFAULT_POLICY = {
     preferredVariants: { ar: 'egyptian' },
   },
   speakers: {
-    // wavlm-base-plus-sv's model card suggests ~0.86 for same-speaker verification;
-    // average linkage over short meeting turns needs a little slack.
-    clusterThreshold: 0.8,
-    enrollmentThreshold: 0.82,
+    // wavlm-base-plus-sv's model card suggests 0.86 for same-speaker verification.
+    clusterThreshold: 0.86,
+    enrollmentThreshold: 0.86,
     minEmbeddingDuration: 1.0,
   },
   turns: {
@@ -29,7 +28,7 @@ export const DEFAULT_POLICY = {
   },
   utterances: {
     // Consecutive turns by the same speaker are transcribed together when this close.
-    maxGap: 1.0,
+    maxGap: 1.5,
     maxDuration: 28,
   },
   merge: {

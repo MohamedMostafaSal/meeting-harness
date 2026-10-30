@@ -13,7 +13,7 @@
 //   transcribe(clip, {model, language})    → {text}                       (M7)
 
 import {
-  SAMPLE_RATE, buildTurns, route, top, windows, assignSpeakers, groupUtterances,
+  SAMPLE_RATE, buildTurns, route, top, windows, assignSpeakers, groupUtterances, similarity,
   hallucinationReason, mergeSegments, roundMs,
 } from './harness.js';
 
@@ -72,6 +72,14 @@ export async function runPipeline(audio, models, options) {
       }
     }
     embeddings.push(await timed('embedding', () => models.embed(clip)));
+  }
+  if (options.debug) {
+    const rows = embeddings.map((a, i) => {
+      const t = turns[units[i].turns[0]];
+      const sims = embeddings.map((b) => (a && b ? similarity(a, b).toFixed(2) : ' -  ')).join(' ');
+      return `  ${t.start.toFixed(1).padStart(5)}s ${units[i].reliable ? ' ' : '*'} ${sims}`;
+    });
+    log.push('Voice similarity (rows/cols = voice samples, * = overlapped):', ...rows);
   }
   const unitLabels = assignSpeakers(embeddings, units.map((u) => u.reliable), registry, policy.speakers);
   const labels = new Array(turns.length).fill(null);
