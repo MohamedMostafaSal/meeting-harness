@@ -98,12 +98,34 @@ def self_test():
 # MARK: - Data
 
 
-def load_clips(limit, seed, max_seconds=30.0):
-    from datasets import Audio, load_dataset
+def load_test_split():
+    """The MGB-3 test split. The dataset's current version only keeps `train`, so
+    this searches its history for the newest version that still has test files."""
+    from datasets import load_dataset
+    from huggingface_hub import HfApi
 
-    ds = load_dataset(DATASET, split="test")
+    try:
+        return load_dataset(DATASET, split="test"), "main", "test"
+    except ValueError:
+        pass
+    api = HfApi()
+    for commit in api.list_repo_commits(DATASET, repo_type="dataset"):
+        files = api.list_repo_files(DATASET, repo_type="dataset", revision=commit.commit_id)
+        test = [f for f in files if f.endswith(".parquet") and "test" in f.lower()]
+        if test:
+            urls = [f"hf://datasets/{DATASET}@{commit.commit_id}/{f}" for f in test]
+            return load_dataset("parquet", data_files=urls, split="train"), commit.commit_id[:7], "test"
+    print("WARNING: no test split anywhere in the dataset's history; scoring on train, which favours MGB-3 fine-tunes")
+    return load_dataset(DATASET, split="train"), "main", "train"
+
+
+def load_clips(limit, seed, max_seconds=30.0):
+    from datasets import Audio
+
+    ds, revision, split = load_test_split()
+    print(f"dataset {DATASET} @ {revision}, split {split}: {len(ds)} rows, columns {ds.column_names}")
     ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-    text_column = "sentence" if "sentence" in ds.column_names else ds.column_names[-1]
+    text_column = "sentence" if "sentence" in ds.column_names else [c for c in ds.column_names if c != "audio"][0]
     order = list(range(len(ds)))
     random.Random(seed).shuffle(order)
     clips = []
@@ -117,7 +139,7 @@ def load_clips(limit, seed, max_seconds=30.0):
         clips.append({"index": i, "audio": audio.astype("float32"), "seconds": seconds, "text": text})
         if len(clips) >= limit:
             break
-    return clips
+    return clips, f"{split} split @ {revision}"
 
 
 # MARK: - Models
@@ -168,7 +190,7 @@ def report(results, clips, examples, args):
     lines = [
         "# Egyptian Arabic speech-to-text scores",
         "",
-        f"{len(clips)} clips ({audio_seconds / 60:.1f} min) from the MGB-3 Egyptian Arabic test set "
+        f"{len(clips)} clips ({audio_seconds / 60:.1f} min) from the MGB-3 Egyptian Arabic {args.source} "
         f"([{DATASET}](https://huggingface.co/datasets/{DATASET})), seed {args.seed}. "
         "Lower is better. Scored with the app's Arabic-aware normalization.",
         "",
@@ -221,7 +243,7 @@ def main():
     if args.self_test:
         return
 
-    clips = load_clips(args.limit, args.seed)
+    clips, args.source = load_clips(args.limit, args.seed)
     print(f"{len(clips)} clips, {sum(c['seconds'] for c in clips) / 60:.1f} min of audio")
     audio_seconds = sum(c["seconds"] for c in clips)
     examples = [{} for _ in range(min(args.examples, len(clips)))]
