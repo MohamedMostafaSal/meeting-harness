@@ -2,6 +2,8 @@
 // Takes the transformers.js module as an argument so the same code runs in the
 // browser (CDN build) and in Node (npm build, for the CI smoke test).
 
+import { quietestCut } from './harness.js';
+
 export const PRESETS = {
   light: {
     label: 'Light: fastest, weakest Arabic',
@@ -20,6 +22,7 @@ export const EMBEDDING_MODEL = 'Xenova/wavlm-base-plus-sv';
 
 const SR = 16000;
 const SEGMENT_CHUNK = 10 * SR; // pyannote segmentation is trained on 10 s chunks
+const CUT_SEARCH = 3 * SR;     // each chunk ends at the quietest point of its last 3 s
 const MAX_EMBED = 10 * SR;     // fingerprint at most the middle 10 s of a turn
 
 export function recognizersFor(preset) {
@@ -66,8 +69,11 @@ export async function loadModels(T, { preset = 'light', device = 'wasm' } = {}, 
     // M1 + M2 + M4: pyannote's 7 classes give silence, single speakers and overlap at once.
     async segment(audio) {
       const out = [];
-      for (let offset = 0, chunk = 0; offset < audio.length; offset += SEGMENT_CHUNK, chunk++) {
-        const part = audio.subarray(offset, Math.min(offset + SEGMENT_CHUNK, audio.length));
+      for (let offset = 0, chunk = 0, end; offset < audio.length; offset = end, chunk++) {
+        end = offset + SEGMENT_CHUNK >= audio.length
+          ? audio.length
+          : quietestCut(audio, offset + SEGMENT_CHUNK - CUT_SEARCH, offset + SEGMENT_CHUNK);
+        const part = audio.subarray(offset, end);
         const padded = new Float32Array(Math.max(part.length, SR));
         padded.set(part);
         const inputs = await segProcessor(padded);

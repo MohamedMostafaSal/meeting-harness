@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_POLICY, windows, evenSplit, buildTurns, route, agglomerate, assignSpeakers,
   hallucinationReason, mergeSegments, wordErrorRate, characterErrorRate, normalizeText,
-  toEvents, toMarkdown, similarity, groupUtterances,
+  toEvents, toMarkdown, similarity, groupUtterances, quietestCut,
 } from '../harness.js';
 
 const policy = DEFAULT_POLICY.router;
@@ -151,4 +151,11 @@ test('exports use the connector wire format', () => {
   const md = toMarkdown(transcript);
   assert.match(md, /\*\*Sara\*\* `00:12 · ar`/);
   assert.match(md, /`1:01:40–1:01:42`: language uncertain/);
+});
+
+test('quietestCut lands in the pause', () => {
+  const audio = new Float32Array(16000 * 3).map((_, i) => Math.sin(i / 3));
+  audio.fill(0, 16000 * 2, 16000 * 2 + 3200); // 200 ms of silence at 2.0 s
+  const cut = quietestCut(audio, 16000, 16000 * 3);
+  assert.ok(cut >= 16000 * 2 && cut <= 16000 * 2 + 3200, `cut at ${cut / 16000}s`);
 });

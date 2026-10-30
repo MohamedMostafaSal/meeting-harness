@@ -65,6 +65,26 @@ export function windows(range, size) {
 
 export const roundMs = (seconds) => Math.round(seconds * 1000) / 1000;
 
+// MARK: - Chunking
+
+/**
+ * The sample index of the quietest 100 ms between `from` and `to` (sample indices),
+ * so fixed-length model windows end in a pause instead of mid-word.
+ */
+export function quietestCut(audio, from, to, frame = SAMPLE_RATE / 10) {
+  let best = to;
+  let bestEnergy = Infinity;
+  for (let start = Math.max(0, from); start + frame <= Math.min(to, audio.length); start += frame / 2) {
+    let energy = 0;
+    for (let i = start; i < start + frame; i++) energy += audio[i] * audio[i];
+    if (energy < bestEnergy) {
+      bestEnergy = energy;
+      best = start + frame / 2;
+    }
+  }
+  return best;
+}
+
 // MARK: - Turns (D4)
 
 /**
