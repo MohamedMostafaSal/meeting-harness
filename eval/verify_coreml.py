@@ -57,10 +57,20 @@ def clips(n, seed, out):
     return picked
 
 
-def coreml(cli, model_dir, clip, report_dir):
+# Decoding setups to compare. "app" is exactly what the iPhone app's WhisperRecognizer
+# uses: whole utterances (no VAD chunking), forced language, 3 temperature fallbacks.
+SETUPS = {
+    "app": ["--chunking-strategy", "none", "--temperature-fallback-count", "3"],
+    "greedy": ["--chunking-strategy", "none", "--temperature-fallback-count", "0"],
+    "cli default (VAD chunks)": [],
+}
+
+
+def coreml(cli, model_dir, clip, report_dir, extra):
+    os.makedirs(report_dir, exist_ok=True)
     cmd = [cli, "transcribe", "--model-path", model_dir, "--audio-path", clip["path"], "--language", "ar",
            "--task", "transcribe", "--use-prefill-prompt", "--skip-special-tokens", "--without-timestamps",
-           "--report", "--report-path", report_dir]
+           "--report", "--report-path", report_dir, *extra]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     name = os.path.splitext(os.path.basename(clip["path"]))[0]
     return json.load(open(os.path.join(report_dir, name + ".json")))["text"]
@@ -84,35 +94,37 @@ def main():
     from transformers import pipeline
     torch_asr = pipeline("automatic-speech-recognition", model=model_id, device="cpu")
 
-    totals = {"coreml": [0, 0], "pytorch": [0, 0]}
+    keys = [*SETUPS, "pytorch"]
+    totals = {k: [0, 0] for k in keys}
     rows = []
     for k, clip in enumerate(samples):
-        ml = coreml(args.cli, model_dir, clip, work)
-        pt = torch_asr({"raw": clip["audio"], "sampling_rate": 16000}, generate_kwargs={"language": "arabic", "task": "transcribe"})["text"]
-        row = {"clip": k + 1, "seconds": len(clip["audio"]) / 16000, "reference": clip["text"], "coreml": ml, "pytorch": pt}
-        for key, text in (("coreml", ml), ("pytorch", pt)):
+        texts = {name: coreml(args.cli, model_dir, clip, os.path.join(work, f"report{i}"), extra)
+                 for i, (name, extra) in enumerate(SETUPS.items())}
+        texts["pytorch"] = torch_asr({"raw": clip["audio"], "sampling_rate": 16000},
+                                     generate_kwargs={"language": "arabic", "task": "transcribe"})["text"]
+        row = {"clip": k + 1, "seconds": len(clip["audio"]) / 16000, "reference": clip["text"], "text": texts, "cer": {}}
+        for key, text in texts.items():
             e, n = char_errors(clip["text"], text)
             totals[key][0] += e
             totals[key][1] += n
-            row[key + "_cer"] = e / max(1, n)
+            row["cer"][key] = e / max(1, n)
         rows.append(row)
 
-    # Per clip, so one bad clip (a repetition loop, a cut-off ending) stands out from a general drift.
-    per_clip = ["| Clip | Seconds | Core ML CER | PyTorch CER |", "|---|---|---|---|"]
-    per_clip += [f"| {r['clip']} | {r['seconds']:.1f} | {r['coreml_cer'] * 100:.1f}% | {r['pytorch_cer'] * 100:.1f}% |" for r in rows]
-    lines = []
-    for r in sorted(rows, key=lambda r: r["pytorch_cer"] - r["coreml_cer"])[:4]:
-        lines += [f"**Clip {r['clip']}** (Core ML {r['coreml_cer'] * 100:.0f}%, PyTorch {r['pytorch_cer'] * 100:.0f}%)",
-                  f"- Reference: {r['reference']}", f"- Core ML: {r['coreml']}", f"- PyTorch: {r['pytorch']}", ""]
-
     cer = {k: e / max(1, n) for k, (e, n) in totals.items()}
+    # Per clip, so one bad clip (a repetition loop, a cut-off ending) stands out from a general drift.
+    per_clip = ["| Clip | Seconds | " + " | ".join(keys) + " |", "|---|---|" + "---|" * len(keys)]
+    per_clip += [f"| {r['clip']} | {r['seconds']:.1f} | " + " | ".join(f"{r['cer'][k] * 100:.1f}%" for k in keys) + " |" for r in rows]
+    lines = []
+    for r in sorted(rows, key=lambda r: r["cer"]["pytorch"] - r["cer"]["app"])[:3]:
+        lines += [f"**Clip {r['clip']}** (app setup {r['cer']['app'] * 100:.0f}%, PyTorch {r['cer']['pytorch'] * 100:.0f}%)",
+                  f"- Reference: {r['reference']}", f"- Core ML, app setup: {r['text']['app']}", f"- PyTorch: {r['text']['pytorch']}", ""]
     summary = [
         f"# Core ML conversion check: `{model_id}`", "",
-        f"{len(samples)} Egyptian Arabic clips from {DATASET} (train split, used only to compare the two formats).", "",
-        "| Format | CER |", "|---|---|",
-        f"| Core ML (WhisperKit, as shipped to the app) | {cer['coreml'] * 100:.1f}% |",
-        f"| PyTorch (original) | {cer['pytorch'] * 100:.1f}% |", "", "## Per clip", "", *per_clip, "",
-        "## Where the two differ most", "", *lines,
+        f"{len(samples)} Egyptian Arabic clips from {DATASET} (train split, used only to compare formats and decoding setups).", "",
+        "| Setup | CER |", "|---|---|",
+        *[f"| {'Core ML, ' + k if k != 'pytorch' else 'PyTorch (original)'} | {cer[k] * 100:.1f}% |" for k in keys], "",
+        "## Per clip", "", *per_clip, "",
+        "## Where the app setup differs most from PyTorch", "", *lines,
     ]
     text = "\n".join(summary)
     print(text)
@@ -120,8 +132,8 @@ def main():
         open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(text + "\n")
     os.makedirs("eval/results", exist_ok=True)
     open("eval/results/coreml-check.md", "w").write(text + "\n")
-    if cer["coreml"] > cer["pytorch"] + 0.05:
-        sys.exit(f"Core ML is worse than PyTorch by {(cer['coreml'] - cer['pytorch']) * 100:.1f} points")
+    if cer["app"] > cer["pytorch"] + 0.05:
+        sys.exit(f"Core ML with the app's setup is worse than PyTorch by {(cer['app'] - cer['pytorch']) * 100:.1f} points")
 
 
 if __name__ == "__main__":
