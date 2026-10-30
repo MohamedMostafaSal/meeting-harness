@@ -120,15 +120,35 @@ def load_test_split():
 
 
 def load_clips(limit, seed, max_seconds=30.0):
+    """Clips as `{index, seconds, text}` plus either raw `audio` or Whisper
+    `features`: the archived MGB-3 test split was saved pre-processed for Whisper
+    training (80-bin log-mel features and token ids), not as audio and text."""
     from datasets import Audio
 
     ds, revision, split = load_test_split()
     print(f"dataset {DATASET} @ {revision}, split {split}: {len(ds)} rows, columns {ds.column_names}")
-    ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-    text_column = "sentence" if "sentence" in ds.column_names else [c for c in ds.column_names if c != "audio"][0]
     order = list(range(len(ds)))
     random.Random(seed).shuffle(order)
     clips = []
+
+    if "input_features" in ds.column_names:
+        from transformers import WhisperTokenizer
+
+        tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
+        for i in order:
+            row = ds[i]
+            text = tokenizer.decode([t for t in row["labels"] if t >= 0], skip_special_tokens=True).strip()
+            length = row.get("input_length")
+            seconds = (length / 16000 if length and length > 1000 else length) or 30.0
+            if not text or seconds > max_seconds or seconds < 0.5:
+                continue
+            clips.append({"index": i, "features": row["input_features"], "seconds": float(seconds), "text": text})
+            if len(clips) >= limit:
+                break
+        return clips, f"{split} split @ {revision} (pre-computed Whisper features)"
+
+    ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+    text_column = "sentence" if "sentence" in ds.column_names else [c for c in ds.column_names if c != "audio"][0]
     for i in order:
         row = ds[i]
         audio = row["audio"]["array"]
@@ -147,9 +167,13 @@ def load_clips(limit, seed, max_seconds=30.0):
 
 def transcribe_all(model_id, clips, batch_size):
     import torch
-    from transformers import pipeline
 
     torch.set_num_threads(os.cpu_count() or 4)
+    if "features" in clips[0]:
+        return transcribe_features(model_id, clips, batch_size)
+
+    from transformers import pipeline
+
     asr = pipeline("automatic-speech-recognition", model=model_id, device="cpu", torch_dtype=torch.float32)
     params = sum(p.numel() for p in asr.model.parameters())
     inputs = [{"raw": c["audio"], "sampling_rate": 16000} for c in clips]
@@ -168,6 +192,39 @@ def transcribe_all(model_id, clips, batch_size):
         forced = "model default"
     elapsed = time.time() - start
     return [o["text"] for o in outputs], elapsed, params, forced
+
+
+def transcribe_features(model_id, clips, batch_size):
+    """Feeds pre-computed 80-bin log-mel features straight to a Whisper model."""
+    import numpy as np
+    import torch
+    from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+    processor = WhisperProcessor.from_pretrained(model_id)
+    model = WhisperForConditionalGeneration.from_pretrained(model_id, torch_dtype=torch.float32).eval()
+    if model.config.num_mel_bins != 80:
+        raise ValueError(f"needs {model.config.num_mel_bins}-bin features; this test set has 80-bin features only")
+    params = sum(p.numel() for p in model.parameters())
+
+    def run(generate_kwargs):
+        texts = []
+        for b in range(0, len(clips), batch_size):
+            feats = torch.tensor(np.stack([np.asarray(c["features"], dtype=np.float32) for c in clips[b:b + batch_size]]))
+            with torch.no_grad():
+                ids = model.generate(input_features=feats, max_new_tokens=225, **generate_kwargs)
+            texts += processor.batch_decode(ids, skip_special_tokens=True)
+        return texts
+
+    start = time.time()
+    try:
+        texts = run({"language": "ar", "task": "transcribe"})
+        forced = "language=arabic"
+    except Exception as error:
+        print(f"  {model_id}: forcing Arabic failed ({error}); using the model's own defaults")
+        start = time.time()
+        texts = run({})
+        forced = "model default"
+    return texts, time.time() - start, params, forced
 
 
 # MARK: - Report
