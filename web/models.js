@@ -38,15 +38,18 @@ export function recognizersFor(preset) {
 
 const short = (id) => id.split('/').pop();
 
-/**
- * Loads every model for `preset`. `onProgress` receives transformers.js download
- * events ({status, file, progress, loaded, total, name}).
- */
-export async function loadModels(T, { preset = 'light', device = 'wasm' } = {}, onProgress = () => {}) {
-  const { pipeline, AutoProcessor, AutoModel, AutoModelForAudioFrameClassification, Tensor } = T;
-  const progress_callback = (p) => onProgress(p);
-  const recognizers = recognizersFor(preset);
+/** Model ids each phase loads, so the page can load one family at a time. */
+export function whisperModels(preset) {
+  return { multilingual: PRESETS[preset].multilingual, english: PRESETS[preset].english };
+}
 
+/**
+ * Voice models: pyannote segmentation (speech, turns, overlap) and WavLM (fingerprints).
+ * `onProgress` receives transformers.js download events ({status, file, progress, loaded, total, name}).
+ */
+export async function loadVoiceModels(T, { device = 'wasm' } = {}, onProgress = () => {}) {
+  const { AutoProcessor, AutoModel, AutoModelForAudioFrameClassification } = T;
+  const progress_callback = (p) => onProgress(p);
   const segProcessor = await AutoProcessor.from_pretrained(SEGMENTATION_MODEL, { progress_callback });
   const segModel = await AutoModelForAudioFrameClassification.from_pretrained(SEGMENTATION_MODEL, {
     device, dtype: 'fp32', progress_callback,
@@ -54,18 +57,7 @@ export async function loadModels(T, { preset = 'light', device = 'wasm' } = {}, 
   const embProcessor = await AutoProcessor.from_pretrained(EMBEDDING_MODEL, { progress_callback });
   const embModel = await AutoModel.from_pretrained(EMBEDDING_MODEL, { device, dtype: 'q8', progress_callback });
 
-  // Specialists that share a model share one loaded pipeline.
-  const asr = new Map();
-  for (const r of recognizers) {
-    if (!asr.has(r.model)) {
-      asr.set(r.model, await pipeline('automatic-speech-recognition', r.model, { device, dtype: 'q8', progress_callback }));
-    }
-  }
-  const lidPipeline = asr.get(PRESETS[preset].multilingual);
-
   return {
-    recognizers,
-
     // M1 + M2 + M4: pyannote's 7 classes give silence, single speakers and overlap at once.
     async segment(audio) {
       const out = [];
@@ -95,12 +87,30 @@ export async function loadModels(T, { preset = 'light', device = 'wasm' } = {}, 
       const { embeddings } = await embModel(inputs);
       return Array.from(embeddings.data);
     },
+  };
+}
+
+/**
+ * One Whisper model (by model id) and the recognizers it serves. A multilingual
+ * model also provides language ID.
+ */
+export async function loadWhisper(T, { preset = 'light', device = 'wasm' } = {}, modelId, onProgress = () => {}) {
+  const { pipeline, Tensor } = T;
+  const recognizers = recognizersFor(preset);
+  const asr = await pipeline('automatic-speech-recognition', modelId, {
+    device, dtype: 'q8', progress_callback: (p) => onProgress(p),
+  });
+  const multilingual = recognizers.some((r) => r.model === modelId && r.forceLanguage);
+
+  return {
+    recognizers,
 
     // M6: Whisper's language token probabilities after <|startoftranscript|>,
     // renormalized over the meeting's languages. transformers.js doesn't expose
     // language detection yet, so this runs one decoder step directly.
     async identify(clip, allowed) {
-      const { model, processor } = lidPipeline;
+      if (!multilingual) throw new Error(`${modelId} is English-only and can't identify languages`);
+      const { model, processor } = asr;
       const config = model.generation_config;
       const inputs = await processor(clip);
       const decoder_input_ids = new Tensor('int64', BigInt64Array.from([BigInt(config.decoder_start_token_id)]), [1, 1]);
@@ -124,9 +134,26 @@ export async function loadModels(T, { preset = 'light', device = 'wasm' } = {}, 
     // M7
     async transcribe(clip, { model, language }) {
       const r = recognizers.find((x) => x.id === model);
+      if (r?.model !== modelId) throw new Error(`${model} is not served by ${modelId}`);
       const options = r.forceLanguage ? { language: language ?? 'en', task: 'transcribe' } : {};
-      const out = await asr.get(r.model)(clip, options);
+      const out = await asr(clip, options);
       return { text: out.text ?? '' };
     },
+  };
+}
+
+/** Every model at once, as one object. For Node (CI smoke test), where memory is plentiful. */
+export async function loadModels(T, settings = {}, onProgress = () => {}) {
+  const preset = settings.preset ?? 'light';
+  const { multilingual, english } = whisperModels(preset);
+  const voices = await loadVoiceModels(T, settings, onProgress);
+  const multi = await loadWhisper(T, { ...settings, preset }, multilingual, onProgress);
+  const en = await loadWhisper(T, { ...settings, preset }, english, onProgress);
+  return {
+    ...voices,
+    recognizers: multi.recognizers,
+    identify: multi.identify,
+    transcribe: (clip, options) =>
+      (multi.recognizers.find((r) => r.id === options.model)?.model === english ? en : multi).transcribe(clip, options),
   };
 }

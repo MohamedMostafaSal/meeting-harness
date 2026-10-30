@@ -90,3 +90,35 @@ test('unroutable speech becomes a gap', async () => {
   assert.equal(transcript.segments.length, 0);
   assert.equal(transcript.gaps.length, 3);
 });
+
+test('staged run (one model family per worker) matches the all-at-once run', async () => {
+  const { diarize, plan, transcribe, assemble, piecesFor, newContext } = await import('../pipeline.js');
+  const { audio, models } = demo();
+  models.recognizers = models.recognizers.map((r) => ({ ...r, model: r.id === 'en' ? 'whisper-en' : 'whisper-multi' }));
+  const options = { policy: DEFAULT_POLICY, registry, meeting: 'm1' };
+  const whole = await runPipeline(audio, models, options);
+
+  // Each phase only gets the model it would load in its own worker.
+  const only = (modelId) => ({
+    recognizers: models.recognizers,
+    identify: models.identify,
+    transcribe: (clip, o) => {
+      assert.equal(models.recognizers.find((r) => r.id === o.model).model, modelId, 'phase used a model it did not load');
+      return models.transcribe(clip, o);
+    },
+  });
+  const ctx = newContext();
+  const utterances = await diarize(audio, { segment: models.segment, embed: models.embed }, options, ctx);
+  const pieces = await plan(audio, utterances, only('whisper-multi'), options, ctx);
+  const multiIdx = piecesFor(pieces, models.recognizers, 'whisper-multi');
+  const enIdx = piecesFor(pieces, models.recognizers, 'whisper-en');
+  assert.equal(multiIdx.length + enIdx.length, pieces.length);
+  const texts = {
+    ...(await transcribe(audio, pieces, multiIdx, only('whisper-multi'), {}, ctx)),
+    ...(await transcribe(audio, pieces, enIdx, only('whisper-en'), {}, ctx)),
+  };
+  // Phases exchange plain data only (what crosses between workers).
+  const roundTrip = (x) => JSON.parse(JSON.stringify(x));
+  const staged = assemble({ ...options, utterances: roundTrip(utterances), pieces: roundTrip(pieces), texts, duration: 20 }, ctx);
+  assert.deepEqual(staged.transcript, whole.transcript);
+});

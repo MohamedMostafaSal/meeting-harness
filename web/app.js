@@ -1,31 +1,35 @@
-// Page logic: audio in, settings, talking to the worker, rendering the transcript.
-import { DEFAULT_POLICY, timestamp, toEvents, toJSONLines, toMarkdown, wordErrorRate, characterErrorRate } from './harness.js';
+// Page logic: audio in, settings, running the pipeline phases, rendering the transcript.
+import { DEFAULT_POLICY, SAMPLE_RATE, timestamp, toEvents, toJSONLines, toMarkdown, wordErrorRate, characterErrorRate } from './harness.js';
 import { decodeToMono16k, Recorder } from './audio.js';
+import { recognizersFor, whisperModels } from './models.js';
+import { newContext, mergeContext, piecesFor, assemble } from './pipeline.js';
 
 const $ = (id) => document.getElementById(id);
 const SAMPLE_URL = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/jfk.wav';
 const VOICES_KEY = 'meeting-harness.voices';
 
 const state = { audio: null, audioName: '', result: null, names: {} };
-const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
-let nextId = 1;
-const pending = new Map();
 
-worker.onmessage = ({ data }) => {
-  const job = pending.get(data.id);
-  if (!job) return;
-  if (data.type === 'download') return showDownload(data);
-  if (data.type === 'stage') return showStage(data);
-  pending.delete(data.id);
-  if (data.type === 'error') job.reject(new Error(data.message));
-  else job.resolve(data);
-};
-
-function ask(message, transfer = []) {
-  const id = nextId++;
+/**
+ * Runs one task in a fresh worker and terminates it afterwards. A WebAssembly
+ * heap never shrinks, so this is how each phase's models leave memory before
+ * the next phase loads its own.
+ */
+function runTask(message) {
+  const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    worker.postMessage({ ...message, id }, transfer);
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'download') return showDownload(data);
+      if (data.type === 'stage') return showStage(data);
+      worker.terminate();
+      if (data.type === 'error') reject(new Error(data.message));
+      else resolve(data);
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      reject(new Error(e.message || 'The model worker could not start. Check the connection and reload.'));
+    };
+    worker.postMessage({ ...message, id: 1 });
   });
 }
 
@@ -150,7 +154,8 @@ $('voice-record').addEventListener('click', async () => {
     button.textContent = 'Saving your voice…';
     const audio = await decodeToMono16k(await voice.stop());
     showProgress(true);
-    const { embedding } = await ask({ type: 'embed', audio, settings: settings() }, [audio.buffer]);
+    phase = '';
+    const { embedding } = await runTask({ task: 'embed', audio, settings: settings() });
     const id = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-') || `voice-${Date.now()}`;
     saveVoices([...voicesCache.filter((v) => v.id !== id), { id, name, embedding }]);
     $('voice-name').value = '';
@@ -176,18 +181,7 @@ $('run').addEventListener('click', async () => {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
   const started = performance.now();
   try {
-    const audio = state.audio.slice();
-    const { result } = await ask({
-      type: 'run',
-      audio,
-      settings: settings(),
-      options: {
-        policy: policy(),
-        registry: voicesCache,
-        allowedLanguages: languages(),
-        meeting: `m_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`,
-      },
-    }, [audio.buffer]);
+    const result = await runStaged();
     result.wall = (performance.now() - started) / 1000;
     state.result = result;
     state.names = {};
@@ -201,7 +195,41 @@ $('run').addEventListener('click', async () => {
   }
 });
 
+// One worker per model family, so at most one family is in memory at a time:
+// voices → multilingual Whisper (language ID + its own pieces) → English Whisper.
+async function runStaged() {
+  const audio = state.audio;
+  const config = settings();
+  const options = {
+    policy: policy(),
+    registry: voicesCache,
+    allowedLanguages: languages(),
+    meeting: `m_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`,
+  };
+  const { multilingual, english } = whisperModels(config.preset);
+  const ctx = newContext();
+
+  phase = 'Step 1 of 3 · ';
+  const d = await runTask({ task: 'diarize', audio, settings: config, options });
+  mergeContext(ctx, d.ctx);
+
+  phase = 'Step 2 of 3 · ';
+  const p = await runTask({ task: 'plan', audio, settings: config, options, utterances: d.utterances, modelId: multilingual });
+  mergeContext(ctx, p.ctx);
+  const texts = { ...p.texts };
+
+  phase = 'Step 3 of 3 · ';
+  if (piecesFor(p.pieces, recognizersFor(config.preset), english).length) {
+    const e = await runTask({ task: 'transcribe', audio, settings: config, options, pieces: p.pieces, modelId: english });
+    mergeContext(ctx, e.ctx);
+    Object.assign(texts, e.texts);
+  }
+  return assemble({ ...options, utterances: d.utterances, pieces: p.pieces, texts, duration: audio.length / SAMPLE_RATE }, ctx);
+}
+
 // MARK: - Progress
+
+let phase = '';
 
 const downloads = new Map();
 
@@ -216,7 +244,7 @@ function showProgress(on) {
 }
 
 function showStage({ stage, done, total }) {
-  $('stage').textContent = total ? `${stage}: utterance ${done + 1} of ${total}` : stage;
+  $('stage').textContent = phase + (total ? `${stage}: ${done + 1} of ${total}` : stage);
   if (total) $('stage-bar').value = done / total;
   else $('stage-bar').removeAttribute('value');
 }

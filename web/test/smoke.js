@@ -4,8 +4,8 @@
 // speech-to-text and speaker clustering together.
 import * as T from '@huggingface/transformers';
 import wavefile from 'wavefile';
-import { loadModels } from '../models.js';
-import { runPipeline } from '../pipeline.js';
+import { loadVoiceModels, loadWhisper, whisperModels } from '../models.js';
+import { newContext, diarize, plan, transcribe, piecesFor, assemble } from '../pipeline.js';
 import { DEFAULT_POLICY, SAMPLE_RATE, toMarkdown, normalizeText } from '../harness.js';
 
 const BASE = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main';
@@ -36,18 +36,28 @@ const audio = new Float32Array(jfk.length + pause.length + mlk.length);
 audio.set(jfk, 0);
 audio.set(mlk, jfk.length + pause.length);
 
-const t0 = Date.now();
-const models = await loadModels(T, { preset: 'light', device: 'cpu' });
-console.log(`models loaded in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+// Same staging as the browser: one model family at a time.
+const settings = { preset: 'light', device: 'cpu' };
+const { multilingual, english } = whisperModels(settings.preset);
+const options = { policy: DEFAULT_POLICY, allowedLanguages: ['en', 'ar'], meeting: 'smoke', debug: true };
+const ctx = newContext();
+const t1 = Date.now();
 
-const lid = await models.identify(jfk, ['en', 'ar']);
+const voices = await loadVoiceModels(T, settings);
+const utterances = await diarize(audio, voices, options, ctx);
+
+const multi = await loadWhisper(T, settings, multilingual);
+const lid = await multi.identify(jfk, ['en', 'ar']);
 console.log('LID on JFK:', lid);
 check(lid[0].language === 'en' && lid[0].confidence > 0.9, 'language ID picks English for JFK');
 
-const t1 = Date.now();
-const { transcript, log, timings } = await runPipeline(audio, models, {
-  policy: DEFAULT_POLICY, allowedLanguages: ['en', 'ar'], meeting: 'smoke', debug: true,
-});
+const pieces = await plan(audio, utterances, multi, options, ctx);
+const texts = await transcribe(audio, pieces, piecesFor(pieces, multi.recognizers, multilingual), multi, {}, ctx);
+
+const en = await loadWhisper(T, settings, english);
+Object.assign(texts, await transcribe(audio, pieces, piecesFor(pieces, en.recognizers, english), en, {}, ctx));
+
+const { transcript, log, timings } = assemble({ ...options, utterances, pieces, texts, duration: audio.length / SAMPLE_RATE }, ctx);
 console.log(`pipeline ran in ${((Date.now() - t1) / 1000).toFixed(1)} s for ${(audio.length / SAMPLE_RATE).toFixed(1)} s of audio`);
 console.log(log.join('\n'));
 console.log(timings);
