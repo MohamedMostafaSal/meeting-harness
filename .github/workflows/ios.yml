@@ -47,6 +47,10 @@ jobs:
   screenshots:
     needs: build
     if: github.ref == 'refs/heads/master'
+    # The newest commit's screenshots win; an older run still going is cancelled.
+    concurrency:
+      group: ios-screenshots
+      cancel-in-progress: true
     runs-on: macos-15
     timeout-minutes: 60
     permissions:
@@ -110,5 +114,5 @@ jobs:
           git add docs/screenshots
           git diff --cached --quiet && exit 0
           git commit -m "Update iOS screenshots"
-          git pull --rebase origin master
+          git pull --rebase -X theirs origin master
           git push origin HEAD:master
