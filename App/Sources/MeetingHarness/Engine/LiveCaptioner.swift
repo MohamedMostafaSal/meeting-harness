@@ -54,7 +54,8 @@ final class LiveCaptioner {
         await (recognizer as? ModelLifecycle)?.unload()
     }
 
-    private func step() async {
+    /// One tick: draft, commit or wait. Internal so tests can drive it without the timer.
+    func step() async {
         let total = buffer.totalSamples
         let (samples, start) = buffer.samples(from: sentences.sentenceStart)
         switch sentences.step(total: total, samples: samples[...], start: start) {

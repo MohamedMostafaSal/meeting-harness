@@ -34,7 +34,6 @@ jobs:
           grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | sort -u | head -150 || true
           grep -q "BUILD SUCCEEDED" build.log
       - name: Unit tests on a simulator
-        continue-on-error: true
         run: |
           set -o pipefail
           DEST=$(xcrun simctl list devices available | grep -m1 -oE "iPhone [0-9]+ Pro \(" | sed 's/ ($//')
