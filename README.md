@@ -10,9 +10,11 @@ Most meeting transcription products send the whole recording through one large m
 
 The intelligence lives in the **structure**: the pipeline, the routing conditions and the confidence gates. The models are replaceable parts.
 
-> Status: **vision / design stage.** No code yet. This README is the working spec.
+> Status: **proof of concept, design stage.** No code yet. This README is the working spec.
 
-**Platform: a phone app first.** The whole pipeline is designed to run **on the device**. Using the cloud is optional and only happens when the user agrees.
+**Platform: an iPhone app, fully local.** The whole pipeline runs **on the device**. No audio or text leaves the phone unless the user exports it.
+
+**Scope: the app is the ears, not the brain.** It produces the best possible transcript. Summaries, action items and any "assistant" work happen *outside* the app, in the user's own AI tools, which receive the meeting through a **connector** (see [Connector](#connector-meeting--your-ai)).
 
 ---
 
@@ -27,9 +29,23 @@ The intelligence lives in the **structure**: the pipeline, the routing condition
 | **Hallucinated text** during silence or noise | No audio reaches ASR without passing voice activity detection (VAD). Low-confidence output is gated, not printed. |
 | Bad with **names, acronyms, domain jargon** | A per-meeting glossary applied as ASR biasing and deterministic post-correction. |
 | **Black box**: no idea how reliable a line is | Every word or segment carries its confidence and the name of the model that produced it. |
-| **Expensive / cloud-only** | Small, quantized models run on the phone's neural engine. Audio never has to leave the device. |
+| **Expensive / cloud-only** | Small, quantized models run on the phone's Neural Engine. Everything is local; there is no server. |
 | **Kills battery / phone gets hot** | Routing takes battery, heat and charging state into account. The heavy work waits until the phone is charging or idle. |
 | **Huge app download** | Language packs: users only download the speech-to-text specialists for the languages they actually speak. |
+
+---
+
+## Decisions so far
+
+| Topic | Decision | Why |
+|---|---|---|
+| Platform | **iOS first** (PoC) | One platform keeps the PoC small. Core ML and the Neural Engine are a mature target for small models. |
+| Where it runs | **Fully local** | Privacy, no server costs, works offline. No cloud escalation at all. |
+| v1 mode | **Record → accurate transcript** after the meeting | Accuracy first. Live captions are the target and the architecture is built for them from day one. |
+| Why live matters | Feeds the **connector** | The user's external AI should be able to follow the meeting while it's happening. |
+| Languages | **English + Arabic** first, then **German** (or French) as the third | Arabic and English are very different and often mixed in one sentence, which is the hardest routing case. A third language checks that the router really generalizes. |
+| Understanding layer | **Out of the app** | Transcription has to be right first. Understanding happens in the user's AI tools via the connector. |
+| Code | **Swift**, with the harness as a UI-free Swift package (`HarnessCore`) | See [Runtime stack](#runtime-stack). |
 
 ---
 
@@ -56,7 +72,7 @@ The router (D5) uses **device state** as conditions, alongside model confidence:
 if thermal >= serious        → live pass only, pause refinement
 if battery < 20% && !charging → smallest ASR tier, defer diarization
 if charging && idle           → run the refine pass on the queued meetings
-if segment conf < τ && user allowed cloud && on Wi-Fi → escalate this segment only
+if segment conf < τ && larger local tier installed → re-run this segment on the larger tier
 ```
 
 ### Model tiers and language packs
@@ -73,11 +89,39 @@ if segment conf < τ && user allowed cloud && on Wi-Fi → escalate this segment
 - **Storage.** Audio is compressed (Opus) and encrypted at rest. The user decides how long raw audio is kept after the transcript is final.
 - **Consent.** Recording laws differ by country. The app makes it easy to tell people they're being recorded. Phone calls are out of scope: iOS doesn't allow recording calls, and many places have stricter laws for them.
 
-### Runtime stack (to validate)
+### Runtime stack
 
-- **Shared core** (the deterministic harness: router, registry, merge, schema) written once in a portable language such as **Rust or C++** and used by both platforms.
-- **Model runtimes:** Core ML / Apple Neural Engine on iOS. LiteRT (TFLite), NNAPI or Qualcomm QNN on Android. ONNX Runtime Mobile, ExecuTorch or whisper.cpp as cross-platform options.
-- **Native UI shells** (Swift / Kotlin) or one cross-platform UI layer. See open questions.
+- **`HarnessCore`**: a pure Swift package with the deterministic harness (router, registry, merge, schema, policies). It has **no UI and no iOS-only imports**, so it builds and tests with `swift test` on macOS *and Linux*. Most of the logic can be tested without a phone.
+- **`HarnessModels`**: adapters that wrap each AI pillar behind a Swift protocol (its contract). Core ML / Neural Engine implementations live here. The core only sees the protocols, so models are swappable and can be faked in tests.
+- **App**: SwiftUI. Recording via `AVAudioEngine` with the background audio mode.
+- **Candidate model runtimes to benchmark:** Core ML conversions of each pillar. Existing open Swift projects that already run Whisper, pyannote-style diarization and VAD on the Neural Engine (e.g. WhisperKit, FluidAudio) are worth evaluating before converting anything ourselves.
+- **Why not a Rust/C++ core yet:** it only pays off once there's a second platform. For an iOS PoC it adds cross-language plumbing with no benefit. Because `HarnessCore` stays UI-free, porting it later is a contained job.
+
+---
+
+## Connector: meeting → your AI
+
+The app doesn't try to be an assistant. It makes the meeting **readable by the assistant you already use**.
+
+**The contract (fixed now):** an append-only stream of transcript events, in the same schema as the transcript store (D9).
+
+```json
+{ "meeting": "m_2026-10-30_1400", "seq": 42, "type": "segment.final",
+  "segment": { "id": "s_0042", "start": 12.4, "end": 13.9, "speaker": "S2",
+               "speaker_name": "Sara", "lang": "ar", "text": "خلينا نبدأ",
+               "conf": 0.94, "producer": "asr-ar-small@1.2" } }
+```
+
+Event types: `meeting.started`, `segment.draft`, `segment.final`, `segment.revised` (when the refine pass improves a segment), `speaker.renamed`, `meeting.ended`.
+
+Using one event stream for both modes means:
+- **Recording mode (v1):** events are written once the transcript is final. The connector delivers a finished file.
+- **Live mode (target):** the same events arrive as they happen. An AI following along sees drafts, then finals, then revisions. Nothing about the format changes.
+
+**The transport (to decide; local-only rules out a cloud relay):**
+1. **Files** (v1): JSON + Markdown written to a folder in the Files app / iCloud Drive that the user's AI tools can read. Simplest, works today.
+2. **Local network:** the phone serves the event stream over the LAN (e.g. as an MCP server or a simple local API) to an AI tool on the user's Mac or PC. This is the path to live mode.
+3. **Share sheet / Shortcuts:** send a finished transcript to any app manually or through automation.
 
 ---
 
@@ -127,9 +171,9 @@ if segment conf < τ && user allowed cloud && on Wi-Fi → escalate this segment
                                             ▼
                      [D] Transcript store (canonical JSON schema)
                                             ▼
-          [M] Optional understanding layer: summary, action items, decisions
+          [D] Connector: event stream + transcript files ──► the user's AI tools
                                             ▼
-                     [D] Exports: JSON · SRT · VTT · Markdown · DOCX
+                     [D] Exports: JSON · SRT · VTT · Markdown
 ```
 
 `[M]` = needs an AI model · `[D]` = deterministic, no model
@@ -150,7 +194,7 @@ Every pillar has one narrow job. The candidate models listed are *starting point
 | M6 | **Spoken Language ID** | segment → language + confidence | Needed for routing and for code-switching. | VoxLingua107 ECAPA, Whisper LID head, MMS-LID |
 | M7 | **ASR specialists** | segment + language → words + timestamps + confidence | The core speech-to-text step, one model per language or family. | language-specific Whisper fine-tunes, Parakeet / Canary, MMS, Moonshine |
 | M8 | **Punctuation & casing** | raw word stream → punctuated sentences | Sentence boundaries depend on meaning. | small punctuation-restoration models |
-| M9 | **Understanding layer** *(optional, last)* | final transcript → summary, action items, decisions | Requires language understanding. Runs on clean text, never raw audio. | small instruction-tuned LLMs with structured (JSON) output |
+| ~~M9~~ | ~~Understanding layer~~ | **Out of scope for the app.** Summaries and action items happen in the user's own AI tools, fed by the connector (D16). | | |
 
 **Rule:** no AI pillar talks to another AI pillar directly. Everything passes through deterministic code in between.
 
@@ -177,6 +221,7 @@ This is the "harness" itself, and it's where most of the product value is.
 | D13 | **Device state monitor** | Exposes battery, charging, temperature, memory pressure and network to the router as plain conditions. |
 | D14 | **Pack manager** | Downloads, verifies, updates and removes language/model packs; tells the router what is installed. |
 | D15 | **Job scheduler** | Queues refine-pass work and runs it when device policy allows (charging, idle, cool). Resumable if interrupted. |
+| D16 | **Connector** | Publishes the meeting to outside AI tools: a live, append-only event stream plus finished transcript files. See below. |
 
 ---
 
@@ -197,26 +242,25 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 
 ## Open questions (to settle together)
 
-- **iOS, Android, or both at launch?** This affects which runtimes we benchmark first.
-- **UI layer:** native (Swift + Kotlin) or cross-platform (Flutter / React Native / Kotlin Multiplatform) on top of the shared core?
-- **Cloud escalation:** never, opt-in per meeting, or opt-in in settings?
-- **Is live captioning a v1 feature,** or is v1 "record now, accurate transcript a few minutes later"?
-- **Launch languages?** Pick 2–3 to start (e.g. English + Arabic) and design the router so more can be added.
-- **Input sources?** Uploaded files, a live mic, or bots joining Zoom / Meet / Teams.
-- **Speaker names:** voice enrollment, calendar invites, or manual labeling after the meeting?
-- **Understanding layer:** in scope for v1, or transcription-only first?
+- **Which Arabic?** Modern Standard Arabic and the dialects (Egyptian, Gulf, Levantine, Maghrebi…) behave very differently for speech-to-text. Which ones matter most in your meetings? This decides which Arabic specialist we benchmark first.
+- **Third language:** German or French?
+- **Connector transport for live mode:** local network (MCP / local API) to a computer, or something else? Which AI tools should it plug into first?
+- **Input sources:** in-person meetings via the iPhone mic first. Importing audio files too? Online calls (Zoom / Meet / Teams) are harder on iOS.
+- **Speaker names:** voice enrollment for the owner, and manual renaming for everyone else after the meeting?
 
 ---
 
 ## Proposed roadmap
 
-1. **Foundations:** transcript schema (D9), ingest (D1), evaluation harness (D11) with reference meetings **recorded on phones**. Benchmark candidate models on real devices: speed, memory, battery, heat.
-2. **Single-language baseline on device:** VAD → ASR → punctuation in a bare-bones app, measured end to end.
-3. **Who spoke:** segmentation, embeddings, clustering and registry (M2, M3, D3, D4, D6).
-4. **Multilingual routing:** LID plus the router, two ASR specialists, code-switch splitting.
-5. **Overlap handling:** detection, conditional separation, merge.
-6. **Live + refine:** streaming live pass, device-aware scheduler (D13, D15), language packs (D14).
-7. **Understanding layer:** summaries and action items from the clean transcript.
+1. **Foundations (no phone needed):** `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
+2. **Reference data:** a small set of English, Arabic and mixed meetings **recorded on an iPhone**, with hand-checked transcripts and speaker labels.
+3. **English + Arabic baseline on device:** record → VAD → language ID → two speech-to-text specialists → punctuation, in a bare-bones SwiftUI app. Measure accuracy, speed, memory, battery and heat.
+4. **Who spoke:** segmentation, embeddings, clustering, registry, owner voice enrollment (M2, M3, D3, D4, D6).
+5. **Code-switching:** splitting segments at language boundaries, measured on the mixed Arabic/English recordings.
+6. **Connector v1:** JSON + Markdown files exported to the Files app.
+7. **Overlap handling:** detection, conditional separation, merge.
+8. **Third language** (German or French) to prove the router generalizes.
+9. **Live mode (target):** streaming live pass, device-aware scheduler (D13, D15), live connector over the local network.
 
 ---
 
