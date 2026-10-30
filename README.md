@@ -272,9 +272,11 @@ The harness is a Swift package. It has no UI and no iOS-only imports, so it buil
 Sources/
   HarnessCore/            the deterministic harness
     Schema/               D9  Transcript, Segment, Gap · D16 MeetingEvent (connector contract)
-    Pillars/Contracts.swift  protocols for the AI pillars (VAD, language ID, speech-to-text, punctuation)
+    Pillars/              protocols for the AI pillars (VAD, language ID, speech-to-text, punctuation,
+                          speaker turns, voice fingerprints, overlap)
     Routing/Router.swift  D5  RouterPolicy + Router: specialist / fallback / split / unroutable
-    Pipeline/             recording-mode pipeline: VAD → LID → route → ASR → gate → events
+    Speakers/             D3  clustering, enrolled-voice registry, speaker assignment, renaming
+    Pipeline/             recording-mode pipeline: VAD → speaker turns → LID → route → ASR → gate → who spoke → events
     Connector/            event sinks, JSON Lines, Markdown export
     Evaluation/           D11 WER / CER with Arabic-aware normalization
   HarnessTesting/         scripted stand-in models + the README's demo meeting
@@ -287,7 +289,17 @@ swift test                 # run the tests
 swift run harness-demo     # see the code-switching example end to end
 ```
 
-Not built yet: speaker diarization (M2–M4, D3), punctuation models, text normalization (D7), live mode, the iOS app and real Core ML models.
+### How "who spoke" works
+
+1. Each speech region is cut into **single-speaker turns** (M2). Turns that overlap another voice are flagged (M4).
+2. Each turn long enough to trust (≥ 0.5 s) gets **one voice fingerprint** (M3), however many language pieces it's later split into.
+3. Clean turns are **clustered** by similarity (average linkage, cosine). Overlapped turns never shape the clusters; they only join one if they're clearly close to it, otherwise they stay unlabeled rather than inventing a speaker.
+4. Clusters are matched **one-to-one** with enrolled voices (e.g. the phone owner) and take their names. The rest become S1, S2… in order of first appearance.
+5. The user can rename a speaker afterwards (`speaker.renamed`).
+
+All thresholds live in `SpeakerPolicy`.
+
+Not built yet: source separation for overlapped speech (M5), punctuation models, text normalization (D7), live mode, the iOS app and real Core ML models.
 
 ---
 
@@ -296,7 +308,7 @@ Not built yet: speaker diarization (M2–M4, D3), punctuation models, text norma
 1. **Foundations (no phone needed)** *(in progress, see [Code](#code))*: `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
 2. **Reference data:** a small set of English, Egyptian Arabic and mixed meetings **recorded on an iPhone**, with hand-checked transcripts and speaker labels.
 3. **English + Egyptian Arabic baseline on device:** record → VAD → language ID → two speech-to-text specialists → punctuation, in a bare-bones SwiftUI app. Measure accuracy, speed, memory, battery and heat.
-4. **Who spoke:** segmentation, embeddings, clustering, registry, owner voice enrollment (M2, M3, D3, D4, D6).
+4. **Who spoke:** segmentation, embeddings, clustering, registry, owner voice enrollment (M2, M3, D3, D4, D6). *Harness side done with scripted models; real models come with the iOS app.*
 5. **Code-switching:** splitting segments at language boundaries, measured on the mixed Egyptian Arabic/English recordings. Compare the split-and-route strategy with the keep-it-whole strategy.
 6. **Connector v1:** JSON + Markdown files exported to the Files app.
 7. **Overlap handling:** detection, conditional separation, merge.

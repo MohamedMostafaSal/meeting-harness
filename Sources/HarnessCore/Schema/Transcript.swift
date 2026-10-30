@@ -124,8 +124,8 @@ public struct Segment: Codable, Equatable, Sendable {
         uncertain: Bool = false
     ) {
         self.id = id
-        self.start = range.start
-        self.end = range.end
+        self.start = roundedToMillisecond(range.start)
+        self.end = roundedToMillisecond(range.end)
         self.speaker = speaker
         self.speakerName = speakerName
         self.language = language
@@ -155,10 +155,15 @@ public struct Gap: Codable, Equatable, Sendable {
     public var reason: String
 
     public init(range: TimeRange, reason: String) {
-        self.start = range.start
-        self.end = range.end
+        self.start = roundedToMillisecond(range.start)
+        self.end = roundedToMillisecond(range.end)
         self.reason = reason
     }
+}
+
+/// Keeps stored times free of float noise like 15.100000000000001.
+func roundedToMillisecond(_ seconds: Double) -> Double {
+    (seconds * 1000).rounded() / 1000
 }
 
 /// The canonical transcript (D9). Every exporter renders from this.

@@ -7,15 +7,17 @@ final class PipelineTests: XCTestCase {
         let meeting = DemoMeeting()
         let transcript = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1")
 
-        XCTAssertEqual(transcript.segments.map(\.text), ["let's get started", "خلينا نبدأ بالـ", "quarterly review"])
-        XCTAssertEqual(transcript.segments.map(\.language), [.english, .arabic, .english])
-        XCTAssertEqual(transcript.segments.map(\.producer), ["asr-en-small@0.1", "asr-ar-eg-small@0.1", "asr-en-small@0.1"])
-        XCTAssertEqual(transcript.segments.map(\.id), ["s_0001", "s_0002", "s_0003"])
+        XCTAssertEqual(transcript.segments.map(\.text), ["let's get started", "sounds good", "خلينا نبدأ بالـ", "quarterly review"])
+        XCTAssertEqual(transcript.segments.map(\.language), [.english, .english, .arabic, .english])
+        XCTAssertEqual(transcript.segments.map(\.producer), [
+            "asr-en-small@0.1", "asr-en-small@0.1", "asr-ar-eg-small@0.1", "asr-en-small@0.1",
+        ])
+        XCTAssertEqual(transcript.segments.map(\.id), ["s_0001", "s_0002", "s_0003", "s_0004"])
 
-        // The Arabic part covers the first window; English covers the rest of the region.
-        XCTAssertEqual(transcript.segments[1].start, 12.4, accuracy: 0.01)
-        XCTAssertEqual(transcript.segments[1].end, 13.4, accuracy: 0.01)
-        XCTAssertEqual(transcript.segments[2].end, 15.1, accuracy: 0.01)
+        // The Arabic part covers the first window; English covers the rest of the turn.
+        XCTAssertEqual(transcript.segments[2].start, 12.4)
+        XCTAssertEqual(transcript.segments[2].end, 13.4)
+        XCTAssertEqual(transcript.segments[3].end, 15.1, "times are rounded to the millisecond")
 
         XCTAssertTrue(meeting.msa.calls.isEmpty, "Egyptian is preferred over MSA")
         XCTAssertTrue(meeting.multilingual.calls.isEmpty, "every part had a confident specialist")
@@ -28,9 +30,9 @@ final class PipelineTests: XCTestCase {
         _ = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1", sink: sink)
 
         XCTAssertEqual(sink.events.map(\.type), [
-            "meeting.started", "segment.final", "segment.final", "segment.final", "meeting.ended",
+            "meeting.started", "segment.final", "segment.final", "segment.final", "segment.final", "meeting.ended",
         ])
-        XCTAssertEqual(sink.events.map(\.seq), Array(0..<5))
+        XCTAssertEqual(sink.events.map(\.seq), Array(0..<6))
         XCTAssertTrue(sink.events.allSatisfy { $0.meeting == "m1" })
     }
 
@@ -52,7 +54,48 @@ final class PipelineTests: XCTestCase {
 
         XCTAssertEqual(transcript.segments.first?.text, "mumbled")
         XCTAssertEqual(transcript.segments.first?.uncertain, true)
-        XCTAssertEqual(transcript.segments[1].uncertain, false)
+        XCTAssertEqual(transcript.segments[2].uncertain, false, "the Egyptian specialist was confident")
+    }
+
+    func testSpeakersAreClusteredAndEnrolledVoiceIsNamed() async throws {
+        let meeting = DemoMeeting()
+        let transcript = try await Pipeline(models: meeting.models, registry: meeting.registry)
+            .transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(transcript.segments.map(\.speaker), [SpeakerID("sara"), SpeakerID("S1"), SpeakerID("sara"), SpeakerID("sara")])
+        XCTAssertEqual(transcript.segments.map(\.speakerName), ["Sara", nil, "Sara", "Sara"])
+        // One fingerprint per turn, not per language piece.
+        XCTAssertEqual(meeting.embedder.calls.count, 3)
+    }
+
+    func testWithoutEnrollmentSpeakersAreNumberedInOrderOfAppearance() async throws {
+        let meeting = DemoMeeting()
+        let transcript = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(transcript.segments.map(\.speaker), [SpeakerID("S1"), SpeakerID("S2"), SpeakerID("S1"), SpeakerID("S1")])
+    }
+
+    func testOverlappedTurnIsFlaggedAndDoesNotCreateASpeaker() async throws {
+        let meeting = DemoMeeting()
+        var models = meeting.models
+        // The guest's turn overlaps someone else; its fingerprint matches nobody well.
+        models.speakers?.overlap = ScriptedOverlapDetector(regions: [TimeRange(start: 4.0, end: 4.5)])
+        let transcript = try await Pipeline(models: models, registry: meeting.registry)
+            .transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(transcript.segments.map(\.overlap), [false, true, false, false])
+        XCTAssertNil(transcript.segments[1].speaker, "an overlapped turn must not invent a new speaker")
+        XCTAssertEqual(transcript.segments[0].speaker, SpeakerID("sara"))
+    }
+
+    func testWithoutSpeakerModelsSegmentsHaveNoSpeaker() async throws {
+        let meeting = DemoMeeting()
+        var models = meeting.models
+        models.speakers = nil
+        let transcript = try await Pipeline(models: models).transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(transcript.segments.count, 3, "without turns, the opening is one segment")
+        XCTAssertTrue(transcript.segments.allSatisfy { $0.speaker == nil })
     }
 
     func testUnroutableSpeechBecomesAGapNotSilence() async throws {

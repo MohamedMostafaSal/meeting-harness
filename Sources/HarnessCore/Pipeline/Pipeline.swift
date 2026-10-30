@@ -6,57 +6,129 @@ public struct PipelineModels {
     public var languageID: any LanguageIdentifier
     public var recognizers: [any SpeechRecognizer]
     public var punctuation: (any PunctuationRestorer)?
+    public var speakers: SpeakerModels?
 
     public init(
         vad: any VoiceActivityDetector,
         languageID: any LanguageIdentifier,
         recognizers: [any SpeechRecognizer],
-        punctuation: (any PunctuationRestorer)? = nil
+        punctuation: (any PunctuationRestorer)? = nil,
+        speakers: SpeakerModels? = nil
     ) {
         self.vad = vad
         self.languageID = languageID
         self.recognizers = recognizers
         self.punctuation = punctuation
+        self.speakers = speakers
     }
 }
 
-/// Recording-mode pipeline (v1): VAD → language ID → router → speech-to-text →
-/// punctuation → confidence gating → events.
+/// Recording-mode pipeline (v1): VAD → speaker turns → language ID → router →
+/// speech-to-text → punctuation → confidence gating → who spoke → events.
 ///
-/// Speaker diarization (M2–M4) is not wired in yet; segments have no speaker.
+/// Overlapped speech is flagged, not separated: source separation (M5) is not wired in yet.
 public final class Pipeline {
     public let models: PipelineModels
     public let router: Router
+    public let speakerPolicy: SpeakerPolicy
+    public var registry: SpeakerRegistry
 
-    public init(models: PipelineModels, policy: RouterPolicy = RouterPolicy()) {
+    public init(
+        models: PipelineModels,
+        policy: RouterPolicy = RouterPolicy(),
+        speakerPolicy: SpeakerPolicy = SpeakerPolicy(),
+        registry: SpeakerRegistry = SpeakerRegistry()
+    ) {
         self.models = models
         self.router = Router(policy: policy, installed: models.recognizers.map { $0.descriptor })
+        self.speakerPolicy = speakerPolicy
+        self.registry = registry
     }
 
     /// Transcribes a whole recording and emits one `segment.final` per segment.
+    ///
+    /// Who spoke is decided once all turns are known (clustering needs the whole
+    /// meeting), so events are emitted at the end.
     public func transcribe(_ audio: AudioClip, meetingID: String, sink: (any EventSink)? = nil) async throws -> Transcript {
-        let events = EventEmitter(meetingID: meetingID, sink: sink)
-        try await events.emit(.meetingStarted)
-
         var transcript = Transcript(meetingID: meetingID)
+        var turns: [Turn] = []
+        var turnOfSegment: [Int] = []
+
         let regions = try await models.vad.speechRegions(in: audio).sorted { $0.start < $1.start }
         for region in regions {
-            for piece in try await plan(audio.slice(region)) {
-                let outcome = try await recognize(piece, in: audio, index: transcript.segments.count + 1)
-                switch outcome {
-                case .segment(let segment):
-                    transcript.segments.append(segment)
-                    try await events.emit(.segmentFinal(segment))
-                case .gap(let gap):
-                    transcript.gaps.append(gap)
-                case .silent:
-                    break
+            for turn in try await speakerTurns(in: audio.slice(region)) {
+                turns.append(turn)
+                for piece in try await plan(audio.slice(turn.range)) {
+                    let outcome = try await recognize(piece, in: audio, index: transcript.segments.count + 1)
+                    switch outcome {
+                    case .segment(var segment):
+                        segment.overlap = turn.overlap
+                        transcript.segments.append(segment)
+                        turnOfSegment.append(turns.count - 1)
+                    case .gap(let gap):
+                        transcript.gaps.append(gap)
+                    case .silent:
+                        break
+                    }
                 }
             }
         }
 
+        let labels = try await identifySpeakers(turns, in: audio)
+        for (i, turn) in turnOfSegment.enumerated() {
+            transcript.segments[i].speaker = labels[turn]?.id
+            transcript.segments[i].speakerName = labels[turn]?.name
+        }
+
+        let events = EventEmitter(meetingID: meetingID, sink: sink)
+        try await events.emit(.meetingStarted)
+        for segment in transcript.segments {
+            try await events.emit(.segmentFinal(segment))
+        }
         try await events.emit(.meetingEnded)
         return transcript
+    }
+
+    // MARK: - Who spoke
+
+    struct Turn {
+        var range: TimeRange
+        var overlap: Bool
+    }
+
+    /// Splits a speech region into single-speaker turns (D4). Without speaker
+    /// models the whole region is one turn.
+    func speakerTurns(in clip: AudioClip) async throws -> [Turn] {
+        let region = clip.timeRange
+        guard let speakers = models.speakers else { return [Turn(range: region, overlap: false)] }
+
+        let ranges = try await speakers.segmenter.speakerTurns(in: clip)
+            .compactMap { r -> TimeRange? in
+                let start = max(r.start, region.start), end = min(r.end, region.end)
+                return end > start ? TimeRange(start: start, end: end) : nil
+            }
+            .sorted { $0.start < $1.start }
+        let overlaps = try await speakers.overlap?.overlapRegions(in: clip) ?? []
+
+        let turns = ranges.isEmpty ? [region] : ranges
+        return turns.map { turn in
+            Turn(range: turn, overlap: overlaps.contains { $0.start < turn.end && turn.start < $0.end })
+        }
+    }
+
+    /// Fingerprints each turn, then clusters and names them (D3).
+    func identifySpeakers(_ turns: [Turn], in audio: AudioClip) async throws -> [SpeakerLabel?] {
+        guard let speakers = models.speakers else { return [SpeakerLabel?](repeating: nil, count: turns.count) }
+        var embeddings: [SpeakerEmbedding?] = []
+        for turn in turns {
+            if turn.range.duration >= speakerPolicy.minEmbeddingDuration {
+                embeddings.append(try await speakers.embedder.embed(audio.slice(turn.range)))
+            } else {
+                embeddings.append(nil)
+            }
+        }
+        return SpeakerAssignment.assign(
+            embeddings, reliable: turns.map { !$0.overlap }, registry: registry, policy: speakerPolicy)
     }
 
     // MARK: - Planning

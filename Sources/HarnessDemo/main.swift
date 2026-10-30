@@ -6,7 +6,7 @@ import HarnessTesting
 
 let meeting = DemoMeeting()
 let sink = InMemoryEventSink()
-let transcript = try await Pipeline(models: meeting.models)
+let transcript = try await Pipeline(models: meeting.models, registry: meeting.registry)
     .transcribe(meeting.audio, meetingID: "demo", sink: sink)
 
 print(MarkdownExporter.render(transcript))
