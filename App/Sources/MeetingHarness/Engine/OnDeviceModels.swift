@@ -76,6 +76,29 @@ final class WhisperModel {
     }
 }
 
+extension WhisperRecognizer {
+    /// Tokens for bracketed notes and symbols ("[music]", "♪"), which Whisper must not
+    /// write in a transcript. OpenAI's Whisper and transformers suppress these by default;
+    /// WhisperKit suppresses nothing unless told to. Without this, the Egyptian model
+    /// turned 26 s of speech into "[مايام الوليد]" (eval/results/coreml-check-2026-10-30.md).
+    /// Built from the tokenizer the way OpenAI's `non_speech_tokens` does.
+    static func nonSpeechTokens(_ tokenizer: any WhisperTokenizer) -> [Int] {
+        let special = tokenizer.specialTokens.specialTokenBegin
+        func encode(_ text: String) -> [Int] { tokenizer.encode(text: text).filter { $0 < special } }
+        var symbols = "\"#()*+/:;<=>@[\\]^_`{|}~「」『』".map(String.init)
+        symbols += "<< >> <<< >>> -- --- -( -[ (' (\" (( )) ((( ))) [[ ]] {{ }} ♪♪ ♪♪♪".split(separator: " ").map(String.init)
+        let miscellaneous = Set("♩♪♫♬♭♮♯".map(String.init))
+        var result = Set<Int>()
+        for text in [" -", " '"] { if let first = encode(text).first { result.insert(first) } }
+        for symbol in symbols + miscellaneous.sorted() {
+            for tokens in [encode(symbol), encode(" " + symbol)] where tokens.count == 1 || (miscellaneous.contains(symbol) && !tokens.isEmpty) {
+                result.insert(tokens[0])
+            }
+        }
+        return result.sorted()
+    }
+}
+
 /// M7: one Whisper model behind the `SpeechRecognizer` contract.
 final class WhisperRecognizer: SpeechRecognizer, ModelLifecycle {
     let descriptor: RecognizerDescriptor
@@ -98,7 +121,9 @@ final class WhisperRecognizer: SpeechRecognizer, ModelLifecycle {
             usePrefillPrompt: forcesLanguage && language != nil,
             detectLanguage: forcesLanguage && language == nil,
             skipSpecialTokens: true,
-            withoutTimestamps: true)
+            withoutTimestamps: true,
+            suppressBlank: true,
+            suppressTokens: kit.tokenizer.map(Self.nonSpeechTokens) ?? [])
         let results = try await kit.transcribe(audioArray: audio.samples, decodeOptions: options)
         let segments = results.flatMap(\.segments)
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)

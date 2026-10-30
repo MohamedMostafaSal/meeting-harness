@@ -30,9 +30,26 @@ with the original PyTorch model.
 
 - On 9 of 12 clips the converted model matches the original to within a point: the conversion is sound.
 - Two clips fail outright in every Core ML setup: clip 8 decodes to a two-word fragment, clip 9 stops
-  halfway through. Decoding settings (fallback, chunking) don't change this, so it happens inside the model.
-- Leading suspect: float16. Core ML runs the model in float16 on the Neural Engine and GPU; PyTorch here
-  ran in float32. The next check runs Core ML on the CPU (float32) and PyTorch in float16 to confirm.
+  halfway through. Decoding settings (fallback, chunking) don't change this.
+
+## Follow-up: where each failure comes from
+
+A second run added Core ML on the CPU and GPU, and the original model in float16:
+
+| Clip | Core ML (Neural Engine) | Core ML (CPU) | Core ML (GPU) | PyTorch float16 | PyTorch float32 |
+|---|---|---|---|---|---|
+| 8 | 95.6% | 95.6% | 95.6% | 32.0% | 32.0% |
+| 9 | 70.4% | 70.4% | 70.4% | 70.4% | 34.4% |
+| 11 | 77.3% | 84.0% | 75.5% | 73.6% | 73.6% |
+
+- **Clip 9 is float16.** PyTorch in float16 stops at the same word as Core ML. Every Core ML compute
+  unit behaves the same, so moving the model off the Neural Engine doesn't help; a fix needs a float32
+  conversion (larger and slower) or a model that is stable in float16.
+- **Clip 8 is not precision.** PyTorch float16 transcribes it fine. Core ML's output starts with "[",
+  the token Whisper uses for notes like "[music]". transformers suppresses those tokens (the model's
+  `suppress_tokens`); WhisperKit suppresses none unless asked ("TODO: implement these as default" in
+  its source). The app now passes the same non-speech list OpenAI's Whisper uses, built from the
+  tokenizer, plus `suppressBlank`; the check now runs the CLI with the model's own list to confirm.
 
 ## What the harness does about it
 

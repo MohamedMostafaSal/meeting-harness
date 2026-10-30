@@ -60,12 +60,19 @@ def clips(n, seed, out):
 # Decoding setups to compare. "app" is exactly what the iPhone app's WhisperRecognizer
 # uses: whole utterances (no VAD chunking), forced language, 3 temperature fallbacks.
 APP = ["--chunking-strategy", "none", "--temperature-fallback-count", "3"]
-SETUPS = {
-    "app": APP,
-    # Where the math runs: the Neural Engine and GPU compute in float16, the CPU in float32.
-    "cpu only": [*APP, "--audio-encoder-compute-units", "cpuOnly", "--text-decoder-compute-units", "cpuOnly"],
-    "gpu": [*APP, "--audio-encoder-compute-units", "cpuAndGPU", "--text-decoder-compute-units", "cpuAndGPU"],
-}
+
+
+def setups(model_id):
+    """Decoding setups to compare. "app" is exactly what the iPhone app's WhisperRecognizer uses:
+    whole utterances (no VAD chunking), forced language, 3 temperature fallbacks, and the model's
+    non-speech tokens suppressed (WhisperKit suppresses none by default; transformers does)."""
+    from transformers import GenerationConfig
+    suppress = [str(t) for t in (GenerationConfig.from_pretrained(model_id).suppress_tokens or [])]
+    print(f"suppressing {len(suppress)} non-speech tokens")
+    return {
+        "app": [*APP, "--suppress-tokens", *suppress],
+        "without suppression": APP,
+    }
 
 
 def coreml(cli, model_dir, clip, report_dir, extra):
@@ -99,6 +106,7 @@ def main():
     device16 = "mps" if torch.backends.mps.is_available() else "cpu"
     torch_asr16 = pipeline("automatic-speech-recognition", model=model_id, device=device16, torch_dtype=torch.float16)
 
+    SETUPS = setups(model_id)
     keys = [*SETUPS, "pytorch float16", "pytorch"]
     totals = {k: [0, 0] for k in keys}
     rows = []
