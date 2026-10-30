@@ -468,9 +468,11 @@ const LAST_RUN_KEY = 'meeting-harness.last-run';
 
 function breadcrumb(update) {
   try {
-    const previous = update.status === 'running' ? {} : JSON.parse(localStorage.getItem(LAST_RUN_KEY) ?? '{}');
-    const settingsNow = { ...settings(), seconds: state.audio ? +(state.audio.length / SAMPLE_RATE).toFixed(1) : null };
-    localStorage.setItem(LAST_RUN_KEY, JSON.stringify({ ...previous, ...settingsNow, ...update, at: new Date().toISOString() }));
+    // A new run records its settings; later updates (stage, done, reported) only add to them.
+    const base = update.status === 'running'
+      ? { ...settings(), seconds: state.audio ? +(state.audio.length / SAMPLE_RATE).toFixed(1) : null }
+      : JSON.parse(localStorage.getItem(LAST_RUN_KEY) ?? '{}');
+    localStorage.setItem(LAST_RUN_KEY, JSON.stringify({ ...base, ...update, at: new Date().toISOString() }));
   } catch { /* storage unavailable: no breadcrumb */ }
 }
 
@@ -498,13 +500,24 @@ function showError(message) {
 }
 
 function diagnostics() {
-  return JSON.stringify({ app: 'meeting-harness web', userAgent: navigator.userAgent, ...state.diag }, null, 2);
+  let lastRun = null;
+  try { lastRun = JSON.parse(localStorage.getItem(LAST_RUN_KEY) ?? 'null'); } catch { /* unavailable */ }
+  const { log, ...rest } = state.diag;
+  return JSON.stringify({
+    app: 'meeting-harness web',
+    userAgent: navigator.userAgent,
+    memoryGB: navigator.deviceMemory ?? null,
+    webgpu: 'gpu' in navigator,
+    lastRun,
+    ...rest,
+    log: log ?? state.result?.log ?? null,
+  }, null, 2);
 }
 
 $('copy-diag').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(diagnostics());
-    $('copy-diag').textContent = 'Copied';
+    $('copy-diag').textContent = 'Copied. Paste it into your report.';
   } catch {
     $('diag-text').textContent = diagnostics();
     $('diag-text').hidden = false;

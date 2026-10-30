@@ -112,8 +112,7 @@
 
     <section id="error" class="panel error" role="alert" hidden>
       <p id="error-text"></p>
-      <button id="copy-diag" class="button secondary" type="button">Copy diagnostics</button>
-      <pre id="diag-text" class="log" hidden></pre>
+      <p class="hint">To report it, use Copy diagnostics at the bottom of the page.</p>
     </section>
 
     <section id="results" class="panel" hidden aria-labelledby="results-title">
@@ -145,6 +144,13 @@
         <button id="score" class="button secondary" type="button">Score</button>
         <p id="score-out" class="mono"></p>
       </details>
+    </section>
+
+    <section class="panel" aria-labelledby="report-title">
+      <h2 id="report-title">Report a problem</h2>
+      <p class="hint">Copies your device and browser, the settings, the audio's length and level, the last step reached (even if the page crashed) and any error. No audio or transcript text is included.</p>
+      <button id="copy-diag" class="button secondary" type="button">Copy diagnostics</button>
+      <pre id="diag-text" class="log" hidden></pre>
     </section>
 
     <footer class="footer">
