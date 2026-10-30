@@ -43,16 +43,22 @@ export async function runPipeline(audio, models, options) {
   const turns = buildTurns(raw, policy.turns);
   log.push(`Segmentation: ${turns.length} turns, ${turns.filter((t) => t.overlap).length} overlapped`);
 
-  // Who spoke: one fingerprint per (chunk, local speaker) from all their audio in that chunk.
+  // Who spoke: one fingerprint per stretch of one local speaker in one chunk. The
+  // segmentation model can reuse a local label for a different voice after a long
+  // silence, so a stretch ends at any gap longer than an utterance gap.
   onProgress({ stage: 'Working out who spoke' });
   const MAX_FINGERPRINT = 10 * SAMPLE_RATE;
   const units = []; // {turns: [index], reliable}
-  const byKey = new Map();
+  const open = new Map(); // `${chunk}:${cls}` → unit index
   turns.forEach((turn, i) => {
     if (turn.overlap) return units.push({ turns: [i], reliable: false });
     const key = `${turn.chunk}:${turn.cls}`;
-    if (!byKey.has(key)) byKey.set(key, units.push({ turns: [], reliable: true }) - 1);
-    units[byKey.get(key)].turns.push(i);
+    const k = open.get(key);
+    if (k !== undefined && turn.start - turns[units[k].turns.at(-1)].end <= policy.utterances.maxGap) {
+      units[k].turns.push(i);
+    } else {
+      open.set(key, units.push({ turns: [i], reliable: true }) - 1);
+    }
   });
   const embeddings = [];
   for (const unit of units) {
