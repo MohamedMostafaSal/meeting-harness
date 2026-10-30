@@ -10,11 +10,11 @@ Arabic-aware normalization. Lower is better. Produced by `eval/score_models.py`
 |---|---|---|---|---|---|---|---|
 | `alexstokes/whisper-small-eg2` | 242M | 1.1% | 1.5% | 0.0% | 91% | 0.23× | ❌ trained on these clips |
 | `rahafvii/STT-EGY` | 242M | 5.9% | 10.9% | 0.0% | 76% | 0.23× | ❌ trained on these clips |
-| **`tawreck-hasaballah/whisper-small-eg`** | 242M | **30.9%** | 63.2% | 25.8% | 0% | 0.23× | ✅ best honest score |
+| **`tawreck-hasaballah/whisper-small-eg`** | 242M | **30.9%** | 63.2% | 25.8% | 0% | 0.23× | ✅ joint best honest score |
+| **`xlpy/whisper-small-egyptian`** | 242M | **30.9%** | 59.5% | 24.1% | 0% | 0.18× | ✅ joint best; loops on some clips ([run](https://github.com/MohamedMostafaSal/meeting-harness/actions/runs/41106087095)) |
 | `openai/whisper-small` | 242M | 39.6% | 68.3% | 30.3% | 0% | 0.24× | general model |
 | `openai/whisper-base` | 73M | 53.4% | 88.6% | 40.1% | 0% | 0.08× | general model (web prototype, Light) |
-| `xlpy/whisper-small-egyptian` | – | – | – | – | – | – | not scored: no processor files (fixed since) |
-| `MAdel121/whisper-medium-egy` | – | – | – | – | – | – | not scored: no processor files (fixed since) |
+| `MAdel121/whisper-medium-egy` | – | – | – | – | – | – | not scorable: the repository has no full model weights |
 | `openai/whisper-large-v3-turbo` | – | – | – | – | – | – | can't be scored here: needs 128-bin features |
 
 ## What it means
@@ -23,9 +23,11 @@ Arabic-aware normalization. Lower is better. Produced by `eval/score_models.py`
   references verbatim, annotators' `...` pause marks and slips included. Their
   scores say nothing about real meetings. The scorer now flags any model that
   reproduces more than 30% of clips exactly.
-- **The honest winner, `whisper-small-eg`, cuts character errors by 22% relative to
-  general Whisper small and 42% relative to Whisper base**, at the same size as
-  Whisper small. Its output reads like Egyptian dialect (`النهاردة`, `ما عندناش`,
+- **Two honest Egyptian fine-tunes tie at 30.9% CER**, cutting character errors by
+  22% relative to general Whisper small and 42% relative to Whisper base, at the
+  same size as Whisper small. `xlpy/whisper-small-egyptian` has slightly better WER
+  and median clip CER but sometimes loops (one clip repeats a word 60 times) and its
+  model card documents no training data or license; `whisper-small-eg`'s card does. Its output reads like Egyptian dialect (`النهاردة`, `ما عندناش`,
   `عايزين`, `بقى`), where general Whisper drifts toward Standard Arabic spellings.
 - **Whisper base is not usable for Egyptian.** It also loops (one clip repeats a
   word 40 times); the app's hallucination guard flags that as "repeats itself".
