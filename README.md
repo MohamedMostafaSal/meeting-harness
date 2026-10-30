@@ -118,7 +118,7 @@ if segment conf < τ && larger local tier installed → re-run this segment on t
 
 The app doesn't try to be an assistant. It makes the meeting **readable by the assistant you already use**.
 
-**The contract (fixed now):** an append-only stream of transcript events, in the same schema as the transcript store (D9).
+**The contract (fixed now):** an append-only stream of transcript events, in the same schema as the transcript store (D9). Implemented in `Sources/HarnessCore/Schema/MeetingEvent.swift`. The example below is abridged.
 
 ```json
 { "meeting": "m_2026-10-30_1400", "seq": 42, "type": "segment.final",
@@ -264,9 +264,36 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 
 ---
 
+## Code
+
+The harness is a Swift package. It has no UI and no iOS-only imports, so it builds on macOS and Linux.
+
+```
+Sources/
+  HarnessCore/            the deterministic harness
+    Schema/               D9  Transcript, Segment, Gap · D16 MeetingEvent (connector contract)
+    Pillars/Contracts.swift  protocols for the AI pillars (VAD, language ID, speech-to-text, punctuation)
+    Routing/Router.swift  D5  RouterPolicy + Router: specialist / fallback / split / unroutable
+    Pipeline/             recording-mode pipeline: VAD → LID → route → ASR → gate → events
+    Connector/            event sinks, JSON Lines, Markdown export
+    Evaluation/           D11 WER / CER with Arabic-aware normalization
+  HarnessTesting/         scripted stand-in models + the README's demo meeting
+  HarnessDemo/            `harness-demo`: runs the demo meeting, prints Markdown + events
+Tests/HarnessCoreTests/
+```
+
+```sh
+swift test                 # run the tests
+swift run harness-demo     # see the code-switching example end to end
+```
+
+Not built yet: speaker diarization (M2–M4, D3), punctuation models, text normalization (D7), live mode, the iOS app and real Core ML models.
+
+---
+
 ## Proposed roadmap
 
-1. **Foundations (no phone needed):** `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
+1. **Foundations (no phone needed)** *(in progress, see [Code](#code))*: `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
 2. **Reference data:** a small set of English, Egyptian Arabic and mixed meetings **recorded on an iPhone**, with hand-checked transcripts and speaker labels.
 3. **English + Egyptian Arabic baseline on device:** record → VAD → language ID → two speech-to-text specialists → punctuation, in a bare-bones SwiftUI app. Measure accuracy, speed, memory, battery and heat.
 4. **Who spoke:** segmentation, embeddings, clustering, registry, owner voice enrollment (M2, M3, D3, D4, D6).

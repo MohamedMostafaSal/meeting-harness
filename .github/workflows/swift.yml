@@ -1,0 +1,15 @@
+name: swift
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+      - run: swift test
+      - run: swift run harness-demo
