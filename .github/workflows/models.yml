@@ -1,0 +1,60 @@
+name: models
+
+# Converts a fine-tuned Whisper model to WhisperKit's Core ML format and publishes
+# it as a GitHub Release the iPhone app downloads from. Run it from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Hugging Face model id
+        default: tawreck-hasaballah/whisper-small-eg
+      tag:
+        description: Release tag
+        default: egyptian-arabic-v1
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install whisperkittools
+        run: pip install git+https://github.com/argmaxinc/whisperkittools
+      - name: Convert to Core ML
+        run: whisperkit-generate-model --model-version "${{ inputs.model }}" --output-dir out
+      - name: Package for the app
+        run: |
+          find out -maxdepth 3 | head -50
+          MODEL_DIR=$(dirname "$(find out -name 'AudioEncoder.mlmodelc' -maxdepth 3 | head -1)")
+          echo "Model folder: $MODEL_DIR"
+          mkdir -p release
+          # Release assets are flat; the manifest maps each asset back to its path.
+          python3 - "$MODEL_DIR" release "${{ inputs.model }}" <<'PY'
+          import json, os, shutil, sys
+          src, dst, model = sys.argv[1], sys.argv[2], sys.argv[3]
+          files = []
+          for root, _, names in os.walk(src):
+              for name in names:
+                  path = os.path.relpath(os.path.join(root, name), src)
+                  asset = path.replace("/", "--")
+                  shutil.copy(os.path.join(root, name), os.path.join(dst, asset))
+                  files.append({"path": path, "asset": asset, "bytes": os.path.getsize(os.path.join(root, name))})
+          manifest = {"model": model, "format": "whisperkit-coreml", "license": "Apache-2.0",
+                      "files": sorted(files, key=lambda f: f["path"])}
+          json.dump(manifest, open(os.path.join(dst, "manifest.json"), "w"), indent=2)
+          print(f"{len(files)} files, {sum(f['bytes'] for f in files) / 1e6:.0f} MB")
+          PY
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ inputs.tag }}" --yes --cleanup-tag || true
+          gh release create "${{ inputs.tag }}" release/* \
+            --title "Egyptian Arabic speech model (Core ML)" \
+            --notes "[${{ inputs.model }}](https://huggingface.co/${{ inputs.model }}) (Apache-2.0), converted to WhisperKit Core ML with whisperkittools. Downloaded by the iPhone app as the Arabic pack. Scores: eval/results/egyptian-asr-2026-10-30.md."
