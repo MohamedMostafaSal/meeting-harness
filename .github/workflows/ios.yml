@@ -33,6 +33,16 @@ jobs:
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO > build.log 2>&1 || true
           grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | sort -u | head -150 || true
           grep -q "BUILD SUCCEEDED" build.log
+      - name: Unit tests on a simulator
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          DEST=$(xcrun simctl list devices available | grep -m1 -oE "iPhone [0-9]+ Pro \(" | sed 's/ ($//')
+          xcodebuild test -project Harness.xcodeproj -scheme Harness \
+            -destination "platform=iOS Simulator,name=$DEST" -derivedDataPath build \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO > test.log 2>&1 || true
+          grep -E "error:|Test Case .*(passed|failed)|TEST (SUCCEEDED|FAILED)|Executed" test.log | sort -u | head -80 || true
+          grep -q "TEST SUCCEEDED" test.log
 
   screenshots:
     needs: build

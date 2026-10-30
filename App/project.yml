@@ -35,3 +35,23 @@ targets:
         CODE_SIGNING_ALLOWED: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
+  HarnessTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/MeetingHarnessTests]
+    dependencies:
+      - target: Harness
+      - package: MeetingHarnessApp
+        product: MeetingHarness
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
+        SWIFT_VERSION: "5.0"
+schemes:
+  Harness:
+    build:
+      targets:
+        Harness: all
+    test:
+      targets: [HarnessTests]
