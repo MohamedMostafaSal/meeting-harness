@@ -140,8 +140,9 @@ Proof of concept. What exists and what's next:
 - [x] Swift harness core: transcript schema, event stream, router, speaker clustering and enrollment, Arabic-aware accuracy metrics
 - [x] Web app running real models in the browser, tested end to end in CI, with live captions
 - [x] Swift core follows the prototype's lessons: who spoke first, one model in memory at a time, loudness normalization, hallucination guard
-- [x] iPhone app: recording with live captions, on-device transcription, speaker naming, transcripts as files (builds in CI; not yet run on a device)
+- [x] iPhone app: recording with live captions, on-device transcription, speaker naming, transcripts as files (builds and passes its unit tests on a simulator in CI; not yet run on a device)
 - [x] Egyptian Arabic model chosen by measurement ([results](eval/results/egyptian-asr-2026-10-30.md)) and converted to Core ML
+- [ ] Core ML Egyptian model matches the original on 9 of 12 test clips but collapses on 2 long ones ([check](eval/results/coreml-check-2026-10-30.md)); float16 is the suspect, under investigation
 - [ ] First run on a real iPhone (xtool or Xcode)
 - [ ] Reference recordings: Egyptian Arabic, English and mixed meetings with checked transcripts
 - [ ] Connector to Claude over the local network (files work today)
