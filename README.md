@@ -12,6 +12,8 @@ The intelligence lives in the **structure**: the pipeline, the routing condition
 
 > Status: **vision / design stage.** No code yet. This README is the working spec.
 
+**Platform: a phone app first.** The whole pipeline is designed to run **on the device**. Using the cloud is optional and only happens when the user agrees.
+
 ---
 
 ## The pain points we're solving
@@ -25,7 +27,57 @@ The intelligence lives in the **structure**: the pipeline, the routing condition
 | **Hallucinated text** during silence or noise | No audio reaches ASR without passing voice activity detection (VAD). Low-confidence output is gated, not printed. |
 | Bad with **names, acronyms, domain jargon** | A per-meeting glossary applied as ASR biasing and deterministic post-correction. |
 | **Black box**: no idea how reliable a line is | Every word or segment carries its confidence and the name of the model that produced it. |
-| **Expensive / cloud-only** | Small models can run on CPU, consumer GPUs or on-device, so local and private deployment is possible. |
+| **Expensive / cloud-only** | Small, quantized models run on the phone's neural engine. Audio never has to leave the device. |
+| **Kills battery / phone gets hot** | Routing takes battery, heat and charging state into account. The heavy work waits until the phone is charging or idle. |
+| **Huge app download** | Language packs: users only download the speech-to-text specialists for the languages they actually speak. |
+
+---
+
+## Mobile-first design
+
+Running on a phone is the strongest argument for the small-specialist approach. A single giant model doesn't fit in a phone's memory, battery or heat limits. A set of 20–200 MB specialists does.
+
+### Draft live, refine later
+
+| | **Live pass** (during the meeting) | **Refine pass** (after the meeting) |
+|---|---|---|
+| Goal | Live captions with low delay | Most accurate final transcript |
+| Runs | VAD → language ID → small streaming speech-to-text | Full diarization, overlap handling, language ID re-run, larger speech-to-text, punctuation |
+| When | Always, within a strict compute budget | When the policy allows: charging, phone cool, app idle, or the user taps "Refine now" |
+| Output | Draft transcript, marked as draft | Replaces the draft segment by segment, with a version history |
+
+The same router drives both passes. Only the rules and budgets differ.
+
+### Device-aware routing
+
+The router (D5) uses **device state** as conditions, alongside model confidence:
+
+```
+if thermal >= serious        → live pass only, pause refinement
+if battery < 20% && !charging → smallest ASR tier, defer diarization
+if charging && idle           → run the refine pass on the queued meetings
+if segment conf < τ && user allowed cloud && on Wi-Fi → escalate this segment only
+```
+
+### Model tiers and language packs
+
+- Each AI pillar comes in tiers (**tiny / small / base**), quantized (int8 / int4) for the phone's neural hardware.
+- The **core pack** ships with the app: VAD, language ID, speaker embeddings, punctuation.
+- **Language packs** are downloaded on demand. Each is one speech-to-text specialist (plus an optional larger refine tier) for one language.
+- The router can only route to packs that are installed. If a language is detected and its pack is missing, the segment goes to the multilingual fallback and the user is offered the download.
+
+### Phone-specific realities
+
+- **One mic in the middle of the table.** No mic per person, so diarization depends on the models. The phone owner's voice can be **enrolled once** during onboarding, which anchors the speaker registry.
+- **Background recording.** On iOS this uses the background audio mode. On Android it needs a foreground service. Recording must survive the screen locking and recover from interruptions such as incoming calls.
+- **Storage.** Audio is compressed (Opus) and encrypted at rest. The user decides how long raw audio is kept after the transcript is final.
+- **Consent.** Recording laws differ by country. The app makes it easy to tell people they're being recorded. Phone calls are out of scope: iOS doesn't allow recording calls, and many places have stricter laws for them.
+
+### Runtime stack (to validate)
+
+- **Shared core** (the deterministic harness: router, registry, merge, schema) written once in a portable language such as **Rust or C++** and used by both platforms.
+- **Model runtimes:** Core ML / Apple Neural Engine on iOS. LiteRT (TFLite), NNAPI or Qualcomm QNN on Android. ONNX Runtime Mobile, ExecuTorch or whisper.cpp as cross-platform options.
+- **Native UI shells** (Swift / Kotlin) or one cross-platform UI layer. See open questions.
 
 ---
 
@@ -121,7 +173,10 @@ This is the "harness" itself, and it's where most of the product value is.
 | D9 | **Transcript schema & store** | One canonical, versioned JSON format: words, speakers, languages, confidences, provenance (which model produced what). |
 | D10 | **Exporters** | JSON, SRT, VTT, Markdown, DOCX, all rendered from the canonical schema. |
 | D11 | **Evaluation harness** | Per-pillar metrics: WER/CER (ASR), DER (diarization), LID accuracy, overlap recall, latency, cost. Regression tests on reference meetings. |
-| D12 | **Model registry & runtime** | Declares the available models, their contracts, hardware needs and versions; loads them lazily and caches them. |
+| D12 | **Model registry & runtime** | Declares the available models, their contracts, tiers, memory/hardware needs and versions; loads and unloads them lazily so they fit in phone memory. |
+| D13 | **Device state monitor** | Exposes battery, charging, temperature, memory pressure and network to the router as plain conditions. |
+| D14 | **Pack manager** | Downloads, verifies, updates and removes language/model packs; tells the router what is installed. |
+| D15 | **Job scheduler** | Queues refine-pass work and runs it when device policy allows (charging, idle, cool). Resumable if interrupted. |
 
 ---
 
@@ -142,8 +197,10 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 
 ## Open questions (to settle together)
 
-- **Live vs. batch first?** Real-time captions limit latency and model size. Batch allows more accuracy passes.
-- **Where does it run?** Fully local (privacy), self-hosted server, or hybrid?
+- **iOS, Android, or both at launch?** This affects which runtimes we benchmark first.
+- **UI layer:** native (Swift + Kotlin) or cross-platform (Flutter / React Native / Kotlin Multiplatform) on top of the shared core?
+- **Cloud escalation:** never, opt-in per meeting, or opt-in in settings?
+- **Is live captioning a v1 feature,** or is v1 "record now, accurate transcript a few minutes later"?
 - **Launch languages?** Pick 2–3 to start (e.g. English + Arabic) and design the router so more can be added.
 - **Input sources?** Uploaded files, a live mic, or bots joining Zoom / Meet / Teams.
 - **Speaker names:** voice enrollment, calendar invites, or manual labeling after the meeting?
@@ -153,12 +210,12 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 
 ## Proposed roadmap
 
-1. **Foundations:** transcript schema (D9), ingest (D1), evaluation harness (D11) with a small set of reference meetings.
-2. **Single-language baseline:** VAD → ASR → punctuation, measured end to end.
+1. **Foundations:** transcript schema (D9), ingest (D1), evaluation harness (D11) with reference meetings **recorded on phones**. Benchmark candidate models on real devices: speed, memory, battery, heat.
+2. **Single-language baseline on device:** VAD → ASR → punctuation in a bare-bones app, measured end to end.
 3. **Who spoke:** segmentation, embeddings, clustering and registry (M2, M3, D3, D4, D6).
 4. **Multilingual routing:** LID plus the router, two ASR specialists, code-switch splitting.
 5. **Overlap handling:** detection, conditional separation, merge.
-6. **Live mode:** streaming buffer and latency-aware routing policies.
+6. **Live + refine:** streaming live pass, device-aware scheduler (D13, D15), language packs (D14).
 7. **Understanding layer:** summaries and action items from the clean transcript.
 
 ---
