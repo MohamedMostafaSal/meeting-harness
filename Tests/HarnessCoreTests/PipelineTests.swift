@@ -136,11 +136,14 @@ final class PipelineTests: XCTestCase {
             centroids: [7: SpeakerEmbedding([0.9, 0.2, 0]), 3: SpeakerEmbedding([0, 1, 0.1])]))
         var models = meeting.models
         models.diarizer = diarizer
-        let transcript = try await Pipeline(models: models, registry: meeting.registry).transcribe(meeting.audio, meetingID: "m1")
+        let pipeline = Pipeline(models: models, registry: meeting.registry)
+        let transcript = try await pipeline.transcribe(meeting.audio, meetingID: "m1")
 
         XCTAssertEqual(transcript.segments.map(\.speakerName), ["Sara", nil, "Sara", "Sara"])
         XCTAssertEqual(transcript.segments[1].speaker, SpeakerID("S1"))
         XCTAssertEqual(diarizer.unloads, 1)
+        // The guest's voice is kept so the user can name it and have it recognized next time.
+        XCTAssertEqual(pipeline.speakerVoices[SpeakerID("S1")], SpeakerEmbedding([0, 1, 0.1]))
     }
 
     func testSameSpeakerTurnsAreTranscribedTogether() async throws {

@@ -64,6 +64,9 @@ public final class Pipeline {
     public let router: Router
     public var registry: SpeakerRegistry
     public private(set) var report = PipelineReport()
+    /// Each named speaker's voice fingerprint from the last run, so a user can say
+    /// "this is me" about a speaker and have the voice recognized next time.
+    public private(set) var speakerVoices: [SpeakerID: SpeakerEmbedding] = [:]
 
     public init(models: PipelineModels, policy: PipelinePolicy = PipelinePolicy(), registry: SpeakerRegistry = SpeakerRegistry()) {
         self.models = models
@@ -95,6 +98,10 @@ public final class Pipeline {
         var order: [Int] = []
         for case let speaker? in turns.map(\.speaker) where !order.contains(speaker) { order.append(speaker) }
         let labels = SpeakerAssignment.name(centroids: diarization.centroids, speakers: order, registry: registry, policy: policy.speakers)
+        speakerVoices = [:]
+        for (speaker, label) in labels {
+            if let centroid = diarization.centroids[speaker] { speakerVoices[label.id] = centroid }
+        }
         let utterances = Utterances.group(turns, labels: labels, policy: policy.utterances)
         report.log.append("Speakers: \(order.count) found in \(turns.count) turns, \(turns.filter(\.overlap).count) overlapped; \(utterances.count) utterances")
 

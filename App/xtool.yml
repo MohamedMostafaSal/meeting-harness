@@ -1,0 +1,5 @@
+# xtool (https://github.com/xtool-org/xtool) builds this package into the iPhone app.
+version: 1
+bundleID: io.github.mohamedmostafasal.meetingharness
+product: MeetingHarness
+infoPath: Info.plist

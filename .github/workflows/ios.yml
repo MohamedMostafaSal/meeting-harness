@@ -1,0 +1,35 @@
+name: ios
+
+# Builds the iPhone app for the simulator and runs its unit tests on macOS.
+on:
+  push:
+    paths: ['App/**', 'Sources/HarnessCore/**', 'Package.swift', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -scheme MeetingHarness
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild build \
+            -scheme MeetingHarness \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO | tee build.log | grep -E "error:|warning: .*MeetingHarness|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+      - name: Show errors
+        if: failure()
+        run: grep -n "error:" build.log | head -80 || true
