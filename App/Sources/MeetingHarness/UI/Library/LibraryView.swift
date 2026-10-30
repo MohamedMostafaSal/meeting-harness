@@ -137,7 +137,7 @@ struct MeetingRow: View {
             status
             if !meeting.speakers.isEmpty || !meeting.languages.isEmpty {
                 HStack(spacing: 8) {
-                    SpeakerStack(speakers: meeting.speakers, size: 22)
+                    SpeakerStack(speakers: meeting.speakers, size: 26)
                     Spacer()
                     ForEach(meeting.languages, id: \.self) { LanguageTag(code: $0) }
                 }
@@ -154,8 +154,8 @@ struct MeetingRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                    .environment(\.layoutDirection, layoutDirection(for: meeting.languages.first))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.layoutDirection, layoutDirection(for: meeting.languages.first))
             }
         case .transcribing:
             ProgressRow(run: app.transcription.runs[meeting.id])

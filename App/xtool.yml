@@ -3,3 +3,4 @@ version: 1
 bundleID: io.github.mohamedmostafasal.meetingharness
 product: MeetingHarness
 infoPath: Info.plist
+iconPath: AppHost/Assets.xcassets/AppIcon.appiconset/icon-1024.png

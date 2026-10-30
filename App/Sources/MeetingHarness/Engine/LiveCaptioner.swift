@@ -26,16 +26,9 @@ final class LiveCaptioner {
     private let recognizer: any SpeechRecognizer
     private var task: Task<Void, Never>?
 
-    /// Absolute sample index where the current sentence starts.
-    private var sentenceStart = 0
-    private var lastDraftAt = 0
+    private var sentences = LiveSentences(sampleRate: LiveBuffer.sampleRate)
     private var lastLanguage: LanguageCode?
-
     private let rate = LiveBuffer.sampleRate
-    private let pauseSeconds = 0.6
-    private let maxSentenceSeconds = 18.0
-    private let draftEverySeconds = 2.0
-    private let silenceRMS: Float = 0.008
 
     init(buffer: LiveBuffer, languageID: any LanguageIdentifier, recognizer: any SpeechRecognizer) {
         self.buffer = buffer
@@ -62,26 +55,15 @@ final class LiveCaptioner {
     }
 
     private func step() async {
-        let now = buffer.totalSamples
-        let length = Double(now - sentenceStart) / Double(rate)
-        guard length >= 1 else { return }
-        let (samples, start) = buffer.samples(from: sentenceStart)
-        if start > sentenceStart { sentenceStart = start }
-
-        let paused = isSilent(samples.suffix(Int(pauseSeconds * Double(rate))))
-        let hasSpeech = !isSilent(samples[...])
-        if !hasSpeech {
-            // Nothing but silence so far: move the sentence start along.
-            sentenceStart = max(sentenceStart, now - Int(pauseSeconds * Double(rate)))
-            return
-        }
-        if paused || length >= maxSentenceSeconds {
-            await commit(samples, start: start)
-            sentenceStart = now
-            lastDraftAt = now
-        } else if Double(now - lastDraftAt) / Double(rate) >= draftEverySeconds {
-            lastDraftAt = now
-            await transcribeDraft(samples, start: start)
+        let total = buffer.totalSamples
+        let (samples, start) = buffer.samples(from: sentences.sentenceStart)
+        switch sentences.step(total: total, samples: samples[...], start: start) {
+        case .commit(let from):
+            await commit(Array(samples[max(0, from - start)...]), start: from)
+        case .draft(let from):
+            await transcribeDraft(Array(samples[max(0, from - start)...]), start: from)
+        case .wait, .skip:
+            break
         }
     }
 
@@ -108,13 +90,6 @@ final class LiveCaptioner {
 
     /// Drafts reuse the last sentence's language; detection runs once per sentence.
     private var lastDraftLanguage: LanguageCode? { lastLanguage }
-
-    private func isSilent(_ samples: ArraySlice<Float>) -> Bool {
-        guard !samples.isEmpty else { return true }
-        var sum: Float = 0
-        for x in samples { sum += x * x }
-        return (sum / Float(samples.count)).squareRoot() < silenceRMS
-    }
 
     /// Demo captions for screenshots.
     func showDemo(_ captions: [(lang: String, text: String)], draft: String) {

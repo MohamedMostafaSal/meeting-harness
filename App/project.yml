@@ -33,4 +33,5 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.mohamedmostafasal.meetingharness
         CODE_SIGNING_ALLOWED: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
