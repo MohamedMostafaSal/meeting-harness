@@ -59,10 +59,12 @@ def clips(n, seed, out):
 
 # Decoding setups to compare. "app" is exactly what the iPhone app's WhisperRecognizer
 # uses: whole utterances (no VAD chunking), forced language, 3 temperature fallbacks.
+APP = ["--chunking-strategy", "none", "--temperature-fallback-count", "3"]
 SETUPS = {
-    "app": ["--chunking-strategy", "none", "--temperature-fallback-count", "3"],
-    "greedy": ["--chunking-strategy", "none", "--temperature-fallback-count", "0"],
-    "cli default (VAD chunks)": [],
+    "app": APP,
+    # Where the math runs: the Neural Engine and GPU compute in float16, the CPU in float32.
+    "cpu only": [*APP, "--audio-encoder-compute-units", "cpuOnly", "--text-decoder-compute-units", "cpuOnly"],
+    "gpu": [*APP, "--audio-encoder-compute-units", "cpuAndGPU", "--text-decoder-compute-units", "cpuAndGPU"],
 }
 
 
@@ -93,13 +95,18 @@ def main():
     import torch
     from transformers import pipeline
     torch_asr = pipeline("automatic-speech-recognition", model=model_id, device="cpu")
+    # The same weights in float16: if this fails like Core ML, precision is the cause.
+    device16 = "mps" if torch.backends.mps.is_available() else "cpu"
+    torch_asr16 = pipeline("automatic-speech-recognition", model=model_id, device=device16, torch_dtype=torch.float16)
 
-    keys = [*SETUPS, "pytorch"]
+    keys = [*SETUPS, "pytorch float16", "pytorch"]
     totals = {k: [0, 0] for k in keys}
     rows = []
     for k, clip in enumerate(samples):
         texts = {name: coreml(args.cli, model_dir, clip, os.path.join(work, f"report{i}"), extra)
                  for i, (name, extra) in enumerate(SETUPS.items())}
+        texts["pytorch float16"] = torch_asr16({"raw": clip["audio"], "sampling_rate": 16000},
+                                               generate_kwargs={"language": "arabic", "task": "transcribe"})["text"]
         texts["pytorch"] = torch_asr({"raw": clip["audio"], "sampling_rate": 16000},
                                      generate_kwargs={"language": "arabic", "task": "transcribe"})["text"]
         row = {"clip": k + 1, "seconds": len(clip["audio"]) / 16000, "reference": clip["text"], "text": texts, "cer": {}}
@@ -122,7 +129,7 @@ def main():
         f"# Core ML conversion check: `{model_id}`", "",
         f"{len(samples)} Egyptian Arabic clips from {DATASET} (train split, used only to compare formats and decoding setups).", "",
         "| Setup | CER |", "|---|---|",
-        *[f"| {'Core ML, ' + k if k != 'pytorch' else 'PyTorch (original)'} | {cer[k] * 100:.1f}% |" for k in keys], "",
+        *[f"| {k if k.startswith('pytorch') else 'Core ML, ' + k} | {cer[k] * 100:.1f}% |" for k in keys], "",
         "## Per clip", "", *per_clip, "",
         "## Where the app setup differs most from PyTorch", "", *lines,
     ]
