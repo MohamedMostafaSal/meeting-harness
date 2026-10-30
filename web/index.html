@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Meeting Harness</title>
   <meta name="description" content="Prototype: multilingual, multi-speaker meeting transcription with small models, running on this device.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Harness">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -14,7 +17,7 @@
 <body>
   <main class="page">
     <header class="masthead">
-      <h1>Meeting Harness</h1>
+      <h1><img src="icon.svg" alt="" width="36" height="36" class="mark">Meeting Harness</h1>
       <p class="lede">Records a meeting and transcribes it with small models that each do one job, routed by plain rules. Everything runs on this device; no audio leaves it.</p>
       <p class="badge-row"><span class="badge">Prototype</span><span class="badge">English · Arabic</span><span class="badge">On device</span></p>
     </header>
@@ -140,6 +143,7 @@
 
     <footer class="footer">
       <p>Models: pyannote segmentation 3.0 (speech, turns, overlap), WavLM speaker verification (voices), Whisper (language and words). The Arabic slot uses general Whisper until an Egyptian model is ready for the browser.</p>
+      <p><a href="https://github.com/MohamedMostafaSal/meeting-harness">Source on GitHub</a> · MIT license</p>
     </footer>
   </main>
 </body>

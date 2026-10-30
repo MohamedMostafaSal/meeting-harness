@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="meeting-harness logo">
+  <title>meeting-harness</title>
+  <rect width="120" height="120" rx="26" fill="#17201c"/>
+  <g fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 34 q5 -9 10 0 t10 0 t10 0 C 58 34, 62 60, 76 60" stroke="#3fb59e"/>
+    <path d="M16 60 q5 -11 10 0 t10 0 t10 0 t10 0 L 76 60" stroke="#b18cf0"/>
+    <path d="M16 86 q5 -9 10 0 t10 0 t10 0 C 58 86, 62 60, 76 60" stroke="#f09a62"/>
+    <path d="M84 60 H 104" stroke="#e6ece9" stroke-width="7"/>
+  </g>
+  <circle cx="78" cy="60" r="8" fill="#e6ece9"/>
+</svg>

@@ -39,7 +39,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir _site && cp web/*.html web/*.js web/*.css _site/
+      - run: mkdir _site && cp web/*.html web/*.js web/*.css web/*.svg web/*.png _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
