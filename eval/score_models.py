@@ -202,8 +202,15 @@ def transcribe_features(model_id, clips, batch_size):
     import torch
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-    processor = WhisperProcessor.from_pretrained(model_id)
     model = WhisperForConditionalGeneration.from_pretrained(model_id, torch_dtype=torch.float32).eval()
+    try:
+        processor = WhisperProcessor.from_pretrained(model_id)
+    except OSError:
+        # Some fine-tunes upload weights only. Fine-tuning keeps Whisper's tokenizer and
+        # features, so the original model of the same size supplies them.
+        size = {384: "tiny", 512: "base", 768: "small", 1024: "medium", 1280: "large-v2"}[model.config.d_model]
+        print(f"  {model_id}: no processor files; using openai/whisper-{size}'s")
+        processor = WhisperProcessor.from_pretrained(f"openai/whisper-{size}")
     if model.config.num_mel_bins != 80:
         raise ValueError(f"needs {model.config.num_mel_bins}-bin features; this test set has 80-bin features only")
     params = sum(p.numel() for p in model.parameters())
