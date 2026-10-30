@@ -35,6 +35,8 @@ DEFAULT_MODELS = [
     "openai/whisper-large-v3-turbo",
 ]
 TRAINED_ON_MGB3 = {"rahafvii/STT-EGY"}
+# Share of clips reproduced exactly above which a score is treated as leaked test data.
+LEAK_THRESHOLD = 0.3
 
 # MARK: - Scoring (same rules as web/harness.js normalizeText)
 
@@ -234,7 +236,11 @@ def score(clips, texts):
     w = [word_errors(c["text"], t) for c, t in zip(clips, texts)]
     c = [char_errors(c["text"], t) for c, t in zip(clips, texts)]
     per_clip_cer = [e / n for e, n in c if n]
+    exact = sum(1 for clip, t in zip(clips, texts) if normalize(clip["text"]) == normalize(t))
     return {
+        # No real model reproduces long human transcripts verbatim, annotator quirks
+        # included, unless it was trained on them.
+        "exact_share": exact / max(1, len(clips)),
         "wer": sum(e for e, _ in w) / max(1, sum(n for _, n in w)),
         "cer": sum(e for e, _ in c) / max(1, sum(n for _, n in c)),
         "median_clip_cer": statistics.median(per_clip_cer) if per_clip_cer else None,
@@ -251,25 +257,29 @@ def report(results, clips, examples, args):
         f"([{DATASET}](https://huggingface.co/datasets/{DATASET})), seed {args.seed}. "
         "Lower is better. Scored with the app's Arabic-aware normalization.",
         "",
-        "| Model | Size | CER | WER | Median clip CER | Speed (CPU) | Notes |",
-        "|---|---|---|---|---|---|---|",
+        "| Model | Size | CER | WER | Median clip CER | Exact clips | Speed (CPU) | Notes |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in ok:
         notes = []
-        if r["model"] in TRAINED_ON_MGB3:
+        if r["exact_share"] > LEAK_THRESHOLD:
+            notes.append("**likely trained on these clips: score not trustworthy**")
+        elif r["model"] in TRAINED_ON_MGB3:
             notes.append("trained on MGB-3 (home advantage)")
         if r["forced"] != "language=arabic":
             notes.append(r["forced"])
         lines.append(
             f"| `{r['model']}` | {r['params'] / 1e6:.0f}M | **{r['cer'] * 100:.1f}%** | {r['wer'] * 100:.1f}% | "
-            f"{r['median_clip_cer'] * 100:.1f}% | {r['rtf']:.2f}× real time | {'; '.join(notes)} |"
+            f"{r['median_clip_cer'] * 100:.1f}% | {r['exact_share'] * 100:.0f}% | {r['rtf']:.2f}× real time | {'; '.join(notes)} |"
         )
     for r in results:
         if "error" in r:
-            lines.append(f"| `{r['model']}` | – | failed | – | – | – | {r['error'][:120]} |")
+            lines.append(f"| `{r['model']}` | – | failed | – | – | – | – | {r['error'][:120]} |")
     lines += [
         "",
         "CER (character error rate) is the main measure for Arabic: word boundaries and spellings vary.",
+        f"Exact clips is the share of clips transcribed exactly like the reference. Real models don't reproduce long human "
+        f"transcripts verbatim (pause marks and slips included), so above {LEAK_THRESHOLD:.0%} the model has most likely seen these clips in training.",
         "Speed is processing time divided by audio length on the CI runner's CPU; it only compares models with each other.",
         "",
         "## Examples",
