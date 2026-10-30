@@ -43,7 +43,22 @@ The intelligence lives in the **structure**: the pipeline, the routing condition
 | Where it runs | **Fully local** | Privacy, no server costs, works offline. No cloud escalation at all. |
 | v1 mode | **Record → accurate transcript** after the meeting | Accuracy first. Live captions are the target and the architecture is built for them from day one. |
 | Why live matters | Feeds the **connector** | The user's external AI should be able to follow the meeting while it's happening. |
-| Languages | **English + Arabic** first, then **German** (or French) as the third | Arabic and English are very different and often mixed in one sentence, which is the hardest routing case. A third language checks that the router really generalizes. |
+| Languages | **English + Egyptian Arabic** first, then **German** (or French) as the third | Egyptian Arabic and English are very different and constantly mixed in one sentence in professional meetings, which is the hardest routing case. A third language checks that the router really generalizes. |
+| Connector target | **Claude** (integration tested later) | The event format is fixed now. Wiring and testing it with Claude comes after transcription quality is proven. |
+
+---
+
+## Egyptian Arabic: what it means for the design
+
+- **Dialect, not MSA.** Most small speech-to-text models are trained mainly on Modern Standard Arabic and do noticeably worse on Egyptian. The Arabic specialist (M7) has to be an **Egyptian-tuned model**, or one we fine-tune. Egyptian broadcast and conversational datasets (e.g. MGB-3) exist for evaluation and tuning.
+- **Language ID stops at "Arabic."** Telling dialects apart reliably is hard for small models. M6 only decides `ar` vs `en` vs other. Which Arabic specialist to use is a **deterministic setting** (`arabic_variant = egyptian`). Model guessing doesn't decide it.
+- **Code-switching is the norm, not the edge case.** English words inside Egyptian sentences ("هنعمل الـ meeting بكرة") are common. They often get only one LID window, so the router needs two strategies:
+  1. split into short windows and route each to the matching specialist (the default), or
+  2. keep the segment whole and use an Arabic model that already handles embedded English, if benchmarking shows it does better.
+  The evaluation harness decides between them, per our principle of measuring every stage.
+- **Mixed-script output.** Arabic words in Arabic script, English words in Latin script, in the same line. No Franco/Arabizi transliteration in the transcript. The deterministic normalizer (D7) handles the `الـ` + English word joins, numbers (Arabic-Indic vs Western digits, as a user setting) and punctuation direction.
+- **Right-to-left + left-to-right in one line.** The UI and the Markdown export must handle bidirectional text correctly. This needs testing with real mixed sentences.
+- **Metrics.** For Arabic, character error rate (CER) and normalized WER: unify alef/hamza variants, taa marbuta, diacritics and tatweel before scoring. Otherwise spelling variants count as errors.
 | Understanding layer | **Out of the app** | Transcription has to be right first. Understanding happens in the user's AI tools via the connector. |
 | Code | **Swift**, with the harness as a UI-free Swift package (`HarnessCore`) | See [Runtime stack](#runtime-stack). |
 
@@ -242,9 +257,8 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 
 ## Open questions (to settle together)
 
-- **Which Arabic?** Modern Standard Arabic and the dialects (Egyptian, Gulf, Levantine, Maghrebi…) behave very differently for speech-to-text. Which ones matter most in your meetings? This decides which Arabic specialist we benchmark first.
 - **Third language:** German or French?
-- **Connector transport for live mode:** local network (MCP / local API) to a computer, or something else? Which AI tools should it plug into first?
+- **Connector transport for live mode:** local network (e.g. an MCP server the phone exposes to Claude on a computer), or something else? Not needed until live mode.
 - **Input sources:** in-person meetings via the iPhone mic first. Importing audio files too? Online calls (Zoom / Meet / Teams) are harder on iOS.
 - **Speaker names:** voice enrollment for the owner, and manual renaming for everyone else after the meeting?
 
@@ -253,10 +267,10 @@ OUTPUT          | Sara: "خلينا نبدأ بالـ quarterly review"
 ## Proposed roadmap
 
 1. **Foundations (no phone needed):** `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
-2. **Reference data:** a small set of English, Arabic and mixed meetings **recorded on an iPhone**, with hand-checked transcripts and speaker labels.
-3. **English + Arabic baseline on device:** record → VAD → language ID → two speech-to-text specialists → punctuation, in a bare-bones SwiftUI app. Measure accuracy, speed, memory, battery and heat.
+2. **Reference data:** a small set of English, Egyptian Arabic and mixed meetings **recorded on an iPhone**, with hand-checked transcripts and speaker labels.
+3. **English + Egyptian Arabic baseline on device:** record → VAD → language ID → two speech-to-text specialists → punctuation, in a bare-bones SwiftUI app. Measure accuracy, speed, memory, battery and heat.
 4. **Who spoke:** segmentation, embeddings, clustering, registry, owner voice enrollment (M2, M3, D3, D4, D6).
-5. **Code-switching:** splitting segments at language boundaries, measured on the mixed Arabic/English recordings.
+5. **Code-switching:** splitting segments at language boundaries, measured on the mixed Egyptian Arabic/English recordings. Compare the split-and-route strategy with the keep-it-whole strategy.
 6. **Connector v1:** JSON + Markdown files exported to the Files app.
 7. **Overlap handling:** detection, conditional separation, merge.
 8. **Third language** (German or French) to prove the router generalizes.
