@@ -29,6 +29,9 @@ final class QualityTests: XCTestCase {
         XCTAssertEqual(HallucinationGuard.check("the the the the the the the the the", duration: 5), .suspicious("repeats itself"))
         XCTAssertEqual(HallucinationGuard.check(String(repeating: "a", count: 100), duration: 1), .suspicious("too much text for the audio length"))
         XCTAssertEqual(HallucinationGuard.check("خلينا نبدأ بالـ quarterly review", duration: 3), .ok)
+        // Two words for 26 s of speech: the Core ML Egyptian model's failure on one test clip.
+        XCTAssertEqual(HallucinationGuard.check("[مايام الوليد]", duration: 26), .suspicious("too little text for the audio length"))
+        XCTAssertEqual(HallucinationGuard.check("ok", duration: 2), .ok, "short replies are fine")
     }
 
     func testMergeJoinsSameSpeakerAndLanguageAcrossSmallGapsOnly() {

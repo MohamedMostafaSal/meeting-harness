@@ -372,6 +372,9 @@ export function hallucinationReason(text, duration) {
   if (words.length >= 8 && new Set(words).size / words.length < 0.3) return 'repeats itself';
   const letters = clean.replace(/\s/g, '').length;
   if (duration > 0 && letters / duration > 30) return 'too much text for the audio length';
+  // Speech runs at roughly 10–15 letters a second; a few words for a long utterance
+  // means the model dropped most of it.
+  if (duration >= 6 && letters / duration < 2) return 'too little text for the audio length';
   return null;
 }
 

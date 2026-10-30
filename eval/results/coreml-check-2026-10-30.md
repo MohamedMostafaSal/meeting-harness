@@ -36,6 +36,7 @@ with the original PyTorch model.
 
 ## What the harness does about it
 
-Failures like these are short or truncated output for a long utterance, which is what the hallucination
-guard and the uncertain flag are for: the app keeps the text but marks it uncertain, and the gap is
-visible in the transcript.
+The hallucination guard (a deterministic rule, in both the Swift core and the web app) now also flags
+"too little text for the audio length": under 2 letters a second over 6 s or more. Clip 8's output is
+caught that way and kept, marked uncertain. A cut-off ending like clip 9's is not caught yet; catching it
+needs word timestamps (to see that the words stop well before the audio does).

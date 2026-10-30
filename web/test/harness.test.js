@@ -116,6 +116,8 @@ test('hallucination guard', () => {
   assert.match(hallucinationReason('اشتركوا في القناة', 2), /hallucination/);
   assert.equal(hallucinationReason('the the the the the the the the the', 5), 'repeats itself');
   assert.equal(hallucinationReason('a'.repeat(100), 1), 'too much text for the audio length');
+  assert.equal(hallucinationReason('[مايام الوليد]', 26), 'too little text for the audio length');
+  assert.equal(hallucinationReason('ok', 2), null);
   assert.equal(hallucinationReason('خلينا نبدأ بالـ quarterly review', 3), null);
 });
 

@@ -65,6 +65,9 @@ public enum HallucinationGuard {
         if words.count >= 8 && Double(Set(words).count) / Double(words.count) < 0.3 { return .suspicious("repeats itself") }
         let letters = clean.filter { !$0.isWhitespace }.count
         if duration > 0 && Double(letters) / duration > 30 { return .suspicious("too much text for the audio length") }
+        // Speech runs at roughly 10–15 letters a second; a few words for a long utterance
+        // means the model dropped most of it (seen with the Core ML Egyptian model).
+        if duration >= 6 && Double(letters) / duration < 2 { return .suspicious("too little text for the audio length") }
         return .ok
     }
 }
