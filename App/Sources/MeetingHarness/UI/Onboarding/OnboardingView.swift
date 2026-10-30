@@ -13,8 +13,20 @@ struct OnboardingView: View {
                 models.tag(1)
                 microphone.tag(2)
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            // The system page dots are white and vanish on the light background.
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { i in
+                    Capsule()
+                        .fill(i == page ? Theme.signal : Theme.rule)
+                        .frame(width: i == page ? 20 : 8, height: 8)
+                }
+            }
+            .animation(.snappy, value: page)
+            .padding(.bottom, 20)
+            .accessibilityElement()
+            .accessibilityLabel("Page \(page + 1) of 3")
 
             Button(page < 2 ? "Continue" : "Start") {
                 if page < 2 { withAnimation { page += 1 } } else { app.settings.onboarded = true }
