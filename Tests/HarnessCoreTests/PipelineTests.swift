@@ -37,10 +37,9 @@ final class PipelineTests: XCTestCase {
     }
 
     func testSilenceNeverReachesSpeechToText() async throws {
-        let meeting = DemoMeeting()
-        var models = meeting.models
-        models.vad = ScriptedVAD(regions: [])
-        let transcript = try await Pipeline(models: models).transcribe(meeting.audio, meetingID: "m1")
+        var meeting = DemoMeeting()
+        meeting.speechRegions = []
+        let transcript = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1")
 
         XCTAssertTrue(transcript.segments.isEmpty)
         XCTAssertTrue(meeting.english.calls.isEmpty)
@@ -76,11 +75,10 @@ final class PipelineTests: XCTestCase {
     }
 
     func testOverlappedTurnIsFlaggedAndDoesNotCreateASpeaker() async throws {
-        let meeting = DemoMeeting()
-        var models = meeting.models
+        var meeting = DemoMeeting()
         // The guest's turn overlaps someone else; its fingerprint matches nobody well.
-        models.speakers?.overlap = ScriptedOverlapDetector(regions: [TimeRange(start: 4.0, end: 4.5)])
-        let transcript = try await Pipeline(models: models, registry: meeting.registry)
+        meeting.overlapRegions = [TimeRange(start: 4.0, end: 4.5)]
+        let transcript = try await Pipeline(models: meeting.models, registry: meeting.registry)
             .transcribe(meeting.audio, meetingID: "m1")
 
         XCTAssertEqual(transcript.segments.map(\.overlap), [false, true, false, false])
@@ -89,10 +87,9 @@ final class PipelineTests: XCTestCase {
     }
 
     func testWithoutSpeakerModelsSegmentsHaveNoSpeaker() async throws {
-        let meeting = DemoMeeting()
-        var models = meeting.models
-        models.speakers = nil
-        let transcript = try await Pipeline(models: models).transcribe(meeting.audio, meetingID: "m1")
+        var meeting = DemoMeeting()
+        meeting.useSpeakerModels = false
+        let transcript = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1")
 
         XCTAssertEqual(transcript.segments.count, 3, "without turns, the opening is one segment")
         XCTAssertTrue(transcript.segments.allSatisfy { $0.speaker == nil })
@@ -103,7 +100,7 @@ final class PipelineTests: XCTestCase {
             RecognizerDescriptor(model: ModelInfo(id: "asr-en", version: "1"), languages: [.english])
         ) { _, _ in RecognitionResult(text: "unused", confidence: 1) }
         let models = PipelineModels(
-            vad: ScriptedVAD(regions: [TimeRange(start: 1, end: 3)]),
+            diarizer: VADOnlyDiarizer(vad: ScriptedVAD(regions: [TimeRange(start: 1, end: 3)])),
             languageID: ScriptedLanguageID { _ in [LanguageGuess(.german, 0.99)] },
             recognizers: [english])
         let transcript = try await Pipeline(models: models).transcribe(.silence(duration: 5, sampleRate: 1_000), meetingID: "m1")
@@ -113,4 +110,79 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(transcript.gaps.first?.start, 1)
         XCTAssertTrue(english.calls.isEmpty)
     }
+
+    func testTranscriptionRunsOneModelAtATime() async throws {
+        let meeting = DemoMeeting()
+        let log = ModelLog()
+        for recognizer in [meeting.english, meeting.egyptian, meeting.msa, meeting.multilingual] { recognizer.log = log }
+        _ = try await Pipeline(models: meeting.models).transcribe(meeting.audio, meetingID: "m1")
+
+        // All English pieces, then free it, then all Arabic pieces: never two models interleaved.
+        XCTAssertEqual(log.entries, [
+            "transcribe asr-en-small", "transcribe asr-en-small", "transcribe asr-en-small", "unload asr-en-small",
+            "transcribe asr-ar-eg-small", "unload asr-ar-eg-small",
+        ])
+    }
+
+    func testDiarizerCentroidsAreNamedAndItsModelFreed() async throws {
+        // A SpeakerKit-style diarizer: its own speaker numbers (not in order of appearance) and one centroid each.
+        let meeting = DemoMeeting()
+        let diarizer = ScriptedDiarizer(Diarization(
+            turns: [
+                DiarizedTurn(range: DemoMeeting.saraOpens, speaker: 7),
+                DiarizedTurn(range: DemoMeeting.guestAnswers, speaker: 3),
+                DiarizedTurn(range: DemoMeeting.codeSwitch, speaker: 7),
+            ],
+            centroids: [7: SpeakerEmbedding([0.9, 0.2, 0]), 3: SpeakerEmbedding([0, 1, 0.1])]))
+        var models = meeting.models
+        models.diarizer = diarizer
+        let transcript = try await Pipeline(models: models, registry: meeting.registry).transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(transcript.segments.map(\.speakerName), ["Sara", nil, "Sara", "Sara"])
+        XCTAssertEqual(transcript.segments[1].speaker, SpeakerID("S1"))
+        XCTAssertEqual(diarizer.unloads, 1)
+    }
+
+    func testSameSpeakerTurnsAreTranscribedTogether() async throws {
+        let meeting = DemoMeeting()
+        // Sara speaks twice with a 1 s pause: one utterance, one call to speech-to-text.
+        let diarizer = ScriptedDiarizer(Diarization(
+            turns: [
+                DiarizedTurn(range: TimeRange(start: 2.0, end: 3.0), speaker: 0),
+                DiarizedTurn(range: TimeRange(start: 4.0, end: 5.5), speaker: 0),
+            ],
+            centroids: [0: DemoMeeting.saraVoice]))
+        var models = meeting.models
+        models.diarizer = diarizer
+        let transcript = try await Pipeline(models: models).transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertEqual(meeting.english.calls.count, 1)
+        XCTAssertEqual(transcript.segments.first?.start, 2.0)
+        XCTAssertEqual(transcript.segments.first?.end, 5.5)
+    }
+
+    func testHallucinatedTextIsFlaggedAndEmptyTextDropped() async throws {
+        let meeting = DemoMeeting()
+        meeting.english.script = { _, _ in RecognitionResult(text: "Thank you for watching!", confidence: 0.95) }
+        meeting.egyptian.script = { _, _ in RecognitionResult(text: " ... ", confidence: 0.95) }
+        let pipeline = Pipeline(models: meeting.models)
+        let transcript = try await pipeline.transcribe(meeting.audio, meetingID: "m1")
+
+        XCTAssertFalse(transcript.segments.isEmpty)
+        XCTAssertTrue(transcript.segments.allSatisfy { $0.uncertain && $0.language == .english })
+        XCTAssertTrue(pipeline.report.log.contains { $0.contains("hallucination") })
+    }
+
+    func testReportRecordsRoutingAndTimings() async throws {
+        let meeting = DemoMeeting()
+        let pipeline = Pipeline(models: meeting.models)
+        var stages: [PipelineProgress.Stage] = []
+        _ = try await pipeline.transcribe(meeting.audio, meetingID: "m1") { stages.append($0.stage) }
+
+        XCTAssertTrue(pipeline.report.log.contains { $0.contains("ambiguous") })
+        XCTAssertNotNil(pipeline.report.timings["transcription"])
+        XCTAssertEqual(stages.first, .speakers)
+        XCTAssertEqual(stages.last, .transcription)
+    }
 }
+

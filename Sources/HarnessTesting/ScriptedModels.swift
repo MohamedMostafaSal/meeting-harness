@@ -20,7 +20,25 @@ public struct ScriptedLanguageID: LanguageIdentifier {
     public func identify(_ audio: AudioClip) async throws -> [LanguageGuess] { script(audio.timeRange) }
 }
 
-public final class ScriptedRecognizer: SpeechRecognizer {
+/// A diarizer that answers with fixed turns and centroids, like SpeakerKit would.
+public final class ScriptedDiarizer: Diarizer, ModelLifecycle {
+    public var diarization: Diarization
+    public private(set) var unloads = 0
+
+    public init(_ diarization: Diarization) { self.diarization = diarization }
+
+    public func diarize(_ audio: AudioClip) async throws -> Diarization { diarization }
+    public func unload() async { unloads += 1 }
+}
+
+/// Records the order models are used and unloaded in, across all scripted models.
+public final class ModelLog {
+    public private(set) var entries: [String] = []
+    public init() {}
+    public func add(_ entry: String) { entries.append(entry) }
+}
+
+public final class ScriptedRecognizer: SpeechRecognizer, ModelLifecycle {
     public struct Call: Equatable {
         public var range: TimeRange
         public var language: LanguageCode?
@@ -30,6 +48,7 @@ public final class ScriptedRecognizer: SpeechRecognizer {
     public var script: (TimeRange, LanguageCode?) -> RecognitionResult
     /// Every call made, so tests can assert which model handled what (and that silence reached none).
     public private(set) var calls: [Call] = []
+    public var log: ModelLog?
 
     public init(_ descriptor: RecognizerDescriptor, script: @escaping (TimeRange, LanguageCode?) -> RecognitionResult) {
         self.descriptor = descriptor
@@ -38,8 +57,11 @@ public final class ScriptedRecognizer: SpeechRecognizer {
 
     public func transcribe(_ audio: AudioClip, language: LanguageCode?) async throws -> RecognitionResult {
         calls.append(Call(range: audio.timeRange, language: language))
+        log?.add("transcribe \(descriptor.model.id)")
         return script(audio.timeRange, language)
     }
+
+    public func unload() async { log?.add("unload \(descriptor.model.id)") }
 }
 
 public struct ScriptedSpeakerSegmenter: SpeakerSegmenter {
@@ -95,6 +117,12 @@ public struct DemoMeeting {
     /// Sara is enrolled; the guest is not.
     public let registry: SpeakerRegistry
 
+    // Knobs tests turn to vary the meeting.
+    public var speechRegions = [DemoMeeting.englishOpening, DemoMeeting.codeSwitch]
+    public var overlapRegions: [TimeRange] = []
+    /// Without speaker models the pipeline only finds speech, not who spoke.
+    public var useSpeakerModels = true
+
     public init() {
         // Low sample rate: the scripted models never look at the samples.
         audio = .silence(duration: 20, sampleRate: 1_000)
@@ -126,8 +154,15 @@ public struct DemoMeeting {
     }
 
     public var models: PipelineModels {
-        PipelineModels(
-            vad: ScriptedVAD(regions: [Self.englishOpening, Self.codeSwitch]),
+        let vad = ScriptedVAD(regions: speechRegions)
+        let diarizer: any Diarizer = useSpeakerModels
+            ? SegmentAndClusterDiarizer(vad: vad, speakers: SpeakerModels(
+                segmenter: ScriptedSpeakerSegmenter(turns: [Self.saraOpens, Self.guestAnswers, Self.codeSwitch]),
+                embedder: embedder,
+                overlap: overlapRegions.isEmpty ? nil : ScriptedOverlapDetector(regions: overlapRegions)))
+            : VADOnlyDiarizer(vad: vad)
+        return PipelineModels(
+            diarizer: diarizer,
             languageID: ScriptedLanguageID { range in
                 if range.end <= 6 { return [LanguageGuess(.english, 0.98)] }
                 // As a whole the mixed sentence is ambiguous; short windows are clear.
@@ -135,10 +170,7 @@ public struct DemoMeeting {
                 return range.midpoint < 13.5 ? [LanguageGuess(.arabic, 0.94)] : [LanguageGuess(.english, 0.97)]
             },
             // MSA is listed before Egyptian on purpose: the policy, not the order, picks the variant.
-            recognizers: [english, msa, egyptian, multilingual],
-            speakers: SpeakerModels(
-                segmenter: ScriptedSpeakerSegmenter(turns: [Self.saraOpens, Self.guestAnswers, Self.codeSwitch]),
-                embedder: embedder)
+            recognizers: [english, msa, egyptian, multilingual]
         )
     }
 }

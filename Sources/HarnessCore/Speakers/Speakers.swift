@@ -86,20 +86,17 @@ public enum SpeakerClustering {
 }
 
 public enum SpeakerAssignment {
-    /// Decides who spoke each turn.
+    /// Groups fingerprints into speakers (numbered by first appearance) and returns
+    /// each cluster's centroid.
     ///
-    /// - `embeddings[i]` is nil when turn `i` has no usable fingerprint (too short): it gets no label.
+    /// - `embeddings[i]` is nil when turn `i` has no usable fingerprint (too short): no speaker.
     /// - `reliable[i]` is false for overlapped turns: they never shape the clusters, and only
     ///   join one if their fingerprint is clearly close to it.
-    ///
-    /// Clusters that match an enrolled voice take its id and name. The rest are
-    /// numbered S1, S2… in order of first appearance.
-    public static func assign(
+    public static func cluster(
         _ embeddings: [SpeakerEmbedding?],
         reliable: [Bool],
-        registry: SpeakerRegistry,
         policy: SpeakerPolicy
-    ) -> [SpeakerLabel?] {
+    ) -> (speakers: [Int?], centroids: [SpeakerEmbedding]) {
         precondition(embeddings.count == reliable.count, "one reliability flag per embedding")
 
         let anchors = embeddings.indices.filter { embeddings[$0] != nil && reliable[$0] }
@@ -109,47 +106,68 @@ public enum SpeakerAssignment {
             SpeakerEmbedding.centroid(anchors.indices.filter { numbers[$0] == c }.map { embeddings[anchors[$0]]! })!
         }
 
-        let labels = label(centroids, registry: registry, policy: policy)
-
-        var result = [SpeakerLabel?](repeating: nil, count: embeddings.count)
-        for (k, i) in anchors.enumerated() { result[i] = labels[numbers[k]] }
+        var speakers = [Int?](repeating: nil, count: embeddings.count)
+        for (k, i) in anchors.enumerated() { speakers[i] = numbers[k] }
         for i in embeddings.indices where !reliable[i] {
             guard let embedding = embeddings[i] else { continue }
             let scored = centroids.indices.map { (cluster: $0, score: embedding.similarity(to: centroids[$0])) }
             if let best = scored.max(by: { $0.score < $1.score }), best.score >= policy.clusterThreshold {
-                result[i] = labels[best.cluster]
+                speakers[i] = best.cluster
             }
         }
-        return result
+        return (speakers, centroids)
     }
 
-    /// Names clusters: one-to-one with enrolled voices (most similar pairs first), then S1, S2…
-    static func label(_ centroids: [SpeakerEmbedding], registry: SpeakerRegistry, policy: SpeakerPolicy) -> [SpeakerLabel] {
-        var pairs: [(cluster: Int, enrolled: Int, score: Double)] = []
-        for c in centroids.indices {
+    /// Names a diarizer's speakers: one-to-one with enrolled voices (most similar pairs
+    /// first), the rest S1, S2… in order of speaker number.
+    public static func name(
+        centroids: [Int: SpeakerEmbedding],
+        speakers: [Int],
+        registry: SpeakerRegistry,
+        policy: SpeakerPolicy
+    ) -> [Int: SpeakerLabel] {
+        var pairs: [(speaker: Int, enrolled: Int, score: Double)] = []
+        for speaker in speakers {
+            guard let centroid = centroids[speaker] else { continue }
             for e in registry.enrolled.indices {
-                let score = centroids[c].similarity(to: registry.enrolled[e].embedding)
-                if score >= policy.enrollmentThreshold { pairs.append((c, e, score)) }
+                let score = centroid.similarity(to: registry.enrolled[e].embedding)
+                if score >= policy.enrollmentThreshold { pairs.append((speaker, e, score)) }
             }
         }
         var matched: [Int: Int] = [:]
         var usedEnrolled = Set<Int>()
-        for pair in pairs.sorted(by: { $0.score > $1.score }) where matched[pair.cluster] == nil && !usedEnrolled.contains(pair.enrolled) {
-            matched[pair.cluster] = pair.enrolled
+        for pair in pairs.sorted(by: { $0.score > $1.score }) where matched[pair.speaker] == nil && !usedEnrolled.contains(pair.enrolled) {
+            matched[pair.speaker] = pair.enrolled
             usedEnrolled.insert(pair.enrolled)
         }
 
         let taken = Set(registry.enrolled.map { $0.id })
         var next = 1
-        return centroids.indices.map { c in
-            if let e = matched[c] {
-                return SpeakerLabel(id: registry.enrolled[e].id, name: registry.enrolled[e].name)
+        var labels: [Int: SpeakerLabel] = [:]
+        for speaker in speakers {
+            if let e = matched[speaker] {
+                labels[speaker] = SpeakerLabel(id: registry.enrolled[e].id, name: registry.enrolled[e].name)
+                continue
             }
             var id = SpeakerID("S\(next)")
             while taken.contains(id) { next += 1; id = SpeakerID("S\(next)") }
             next += 1
-            return SpeakerLabel(id: id)
+            labels[speaker] = SpeakerLabel(id: id)
         }
+        return labels
+    }
+
+    /// Clusters and names in one step: who spoke each turn.
+    public static func assign(
+        _ embeddings: [SpeakerEmbedding?],
+        reliable: [Bool],
+        registry: SpeakerRegistry,
+        policy: SpeakerPolicy
+    ) -> [SpeakerLabel?] {
+        let clustering = cluster(embeddings, reliable: reliable, policy: policy)
+        let centroids = Dictionary(uniqueKeysWithValues: clustering.centroids.enumerated().map { ($0.offset, $0.element) })
+        let labels = name(centroids: centroids, speakers: Array(clustering.centroids.indices), registry: registry, policy: policy)
+        return clustering.speakers.map { $0.flatMap { labels[$0] } }
     }
 }
 

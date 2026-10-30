@@ -63,3 +63,47 @@ public struct SpeakerModels {
         self.overlap = overlap
     }
 }
+
+// MARK: - Diarization (M1–M4 as one pillar)
+
+/// One stretch of speech by one speaker, as a diarizer reports it.
+public struct DiarizedTurn: Equatable, Sendable {
+    public var range: TimeRange
+    /// The diarizer's own speaker number, local to one recording. Nil when unknown.
+    public var speaker: Int?
+    /// Two or more people were talking at once.
+    public var overlap: Bool
+
+    public init(range: TimeRange, speaker: Int?, overlap: Bool = false) {
+        self.range = range
+        self.speaker = speaker
+        self.overlap = overlap
+    }
+}
+
+/// Who spoke when, plus one voice fingerprint per speaker so enrolled voices can be named.
+public struct Diarization: Sendable {
+    public var turns: [DiarizedTurn]
+    /// Keyed by `DiarizedTurn.speaker`. A speaker without a centroid can't be named.
+    public var centroids: [Int: SpeakerEmbedding]
+
+    public init(turns: [DiarizedTurn], centroids: [Int: SpeakerEmbedding] = [:]) {
+        self.turns = turns
+        self.centroids = centroids
+    }
+}
+
+/// Finds speech and says who spoke when. On device this is one model package
+/// (e.g. pyannote via SpeakerKit); in the core it can also be composed from the
+/// separate pillars (`SegmentAndClusterDiarizer`). Silence never becomes a turn.
+public protocol Diarizer {
+    func diarize(_ audio: AudioClip) async throws -> Diarization
+}
+
+// MARK: - Model lifecycle
+
+/// A model that holds memory while loaded. The pipeline unloads each one as soon
+/// as its phase is done, so only one large model is resident at a time.
+public protocol ModelLifecycle: AnyObject {
+    func unload() async
+}
