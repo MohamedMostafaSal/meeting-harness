@@ -1,0 +1,14 @@
+{
+  "name": "meeting-harness-web",
+  "private": true,
+  "type": "module",
+  "description": "Web prototype of meeting-harness. No build step: the browser loads these files as-is.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "smoke": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "wavefile": "11.0.0"
+  }
+}

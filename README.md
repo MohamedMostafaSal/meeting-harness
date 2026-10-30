@@ -303,6 +303,30 @@ Not built yet: source separation for overlapped speech (M5), punctuation models,
 
 ---
 
+## Web prototype
+
+`web/` is a phone-friendly web app that runs the same pipeline in the browser, with real models, so the idea can be tried in a real meeting before the iOS app exists. It's a throwaway copy of the harness logic in JavaScript (`web/harness.js` mirrors `HarnessCore`), not the product.
+
+| Pillar | Model in the prototype |
+|---|---|
+| Speech, speaker turns, overlap (M1, M2, M4) | pyannote segmentation 3.0 (one 6 MB model, 7 classes: silence, 3 speakers, 3 overlap pairs) |
+| Voice fingerprints (M3) | WavLM base plus, speaker verification |
+| Language ID (M6) | Whisper's language token, limited to the meeting's languages |
+| Speech-to-text (M7) | English: Whisper tiny.en / base.en · Arabic and fallback: Whisper base / small |
+
+Known gaps: the Arabic slot is general Whisper (no browser-ready Egyptian model yet), there is no ASR confidence (segments carry the language-ID confidence), and models run on the CPU (WASM) by default, so it is slower than the native app will be.
+
+```sh
+cd web
+npm install && npm test   # logic and pipeline tests
+npm run smoke             # real models on two famous speeches (needs internet)
+python3 -m http.server    # then open http://localhost:8000
+```
+
+The `web` workflow tests it on every push and can deploy it to GitHub Pages.
+
+---
+
 ## Proposed roadmap
 
 1. **Foundations (no phone needed)** *(in progress, see [Code](#code))*: `HarnessCore` Swift package with the transcript schema and event types (D9, D16), the router skeleton (D5) and the evaluation harness (D11). Fake models behind the protocols so the whole pipeline can be tested on Linux/macOS.
