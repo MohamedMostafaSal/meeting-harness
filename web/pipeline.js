@@ -1,5 +1,9 @@
-// Recording-mode pipeline for the web prototype. Mirrors Sources/HarnessCore/Pipeline:
-// segmentation → turns → language ID → router → speech-to-text → gating → who spoke → merge.
+// Recording-mode pipeline for the web prototype:
+// segmentation → turns → who spoke → utterances → language ID → router → speech-to-text → gating → merge.
+//
+// Unlike the Swift core so far, who spoke is decided *before* transcription:
+// fingerprints are taken per speaker per segmentation chunk (more audio, steadier
+// voices), and each speaker's consecutive turns are transcribed as one utterance.
 //
 // `models` is any object with this contract (real ones live in models.js, fakes in tests):
 //   recognizers: [{id, label, languages?, variant?, fallback?}]
@@ -9,7 +13,7 @@
 //   transcribe(clip, {model, language})    → {text}                       (M7)
 
 import {
-  SAMPLE_RATE, buildTurns, route, top, windows, assignSpeakers,
+  SAMPLE_RATE, buildTurns, route, top, windows, assignSpeakers, groupUtterances,
   hallucinationReason, mergeSegments, roundMs,
 } from './harness.js';
 
@@ -38,6 +42,45 @@ export async function runPipeline(audio, models, options) {
   const raw = await timed('segmentation', () => models.segment(audio));
   const turns = buildTurns(raw, policy.turns);
   log.push(`Segmentation: ${turns.length} turns, ${turns.filter((t) => t.overlap).length} overlapped`);
+
+  // Who spoke: one fingerprint per (chunk, local speaker) from all their audio in that chunk.
+  onProgress({ stage: 'Working out who spoke' });
+  const MAX_FINGERPRINT = 10 * SAMPLE_RATE;
+  const units = []; // {turns: [index], reliable}
+  const byKey = new Map();
+  turns.forEach((turn, i) => {
+    if (turn.overlap) return units.push({ turns: [i], reliable: false });
+    const key = `${turn.chunk}:${turn.cls}`;
+    if (!byKey.has(key)) byKey.set(key, units.push({ turns: [], reliable: true }) - 1);
+    units[byKey.get(key)].turns.push(i);
+  });
+  const embeddings = [];
+  for (const unit of units) {
+    const seconds = unit.turns.reduce((sum, i) => sum + turns[i].end - turns[i].start, 0);
+    if (seconds < policy.speakers.minEmbeddingDuration) { embeddings.push(null); continue; }
+    let clip;
+    if (unit.turns.length === 1) {
+      clip = slice(turns[unit.turns[0]]);
+    } else {
+      const parts = unit.turns.map((i) => slice(turns[i]));
+      clip = new Float32Array(Math.min(MAX_FINGERPRINT, parts.reduce((n, p) => n + p.length, 0)));
+      let at = 0;
+      for (const p of parts) {
+        if (at >= clip.length) break;
+        clip.set(p.subarray(0, clip.length - at), at);
+        at += p.length;
+      }
+    }
+    embeddings.push(await timed('embedding', () => models.embed(clip)));
+  }
+  const unitLabels = assignSpeakers(embeddings, units.map((u) => u.reliable), registry, policy.speakers);
+  const labels = new Array(turns.length).fill(null);
+  units.forEach((u, k) => u.turns.forEach((i) => (labels[i] = unitLabels[k])));
+  const speakerCount = new Set(unitLabels.filter(Boolean).map((l) => l.id)).size;
+  log.push(`Speakers: ${speakerCount} found from ${units.length} voice samples, ${labels.filter((l) => l === null).length} turns unlabeled`);
+
+  const utterances = groupUtterances(turns, labels, policy.utterances);
+  log.push(`Utterances: ${utterances.length}`);
 
   const identify = (r) => timed('languageID', () => models.identify(slice(r), allowedLanguages));
 
@@ -78,10 +121,9 @@ export async function runPipeline(audio, models, options) {
   }
 
   const segments = [];
-  const turnOfSegment = [];
   const gaps = [];
-  for (const [i, turn] of turns.entries()) {
-    onProgress({ stage: 'Transcribing', done: i, total: turns.length });
+  for (const [i, turn] of utterances.entries()) {
+    onProgress({ stage: 'Transcribing', done: i, total: utterances.length });
     for (const piece of await plan(turn)) {
       const { range, decision, guesses } = piece;
       if (decision.kind === 'unroutable') {
@@ -97,8 +139,8 @@ export async function runPipeline(audio, models, options) {
       segments.push({
         start: roundMs(range.start),
         end: roundMs(range.end),
-        speaker: null,
-        speaker_name: null,
+        speaker: turn.label?.id ?? null,
+        speaker_name: turn.label?.name ?? null,
         lang: language,
         text: text.trim(),
         // Prototype: language-ID confidence of the chosen language. There is no ASR confidence yet.
@@ -108,25 +150,8 @@ export async function runPipeline(audio, models, options) {
         uncertain: why !== null,
         why: why ?? undefined,
       });
-      turnOfSegment.push(i);
     }
   }
-
-  onProgress({ stage: 'Working out who spoke' });
-  const embeddings = [];
-  for (const turn of turns) {
-    embeddings.push(turn.end - turn.start >= policy.speakers.minEmbeddingDuration
-      ? await timed('embedding', () => models.embed(slice(turn)))
-      : null);
-  }
-  const labels = assignSpeakers(embeddings, turns.map((t) => !t.overlap), registry, policy.speakers);
-  segments.forEach((s, k) => {
-    const label = labels[turnOfSegment[k]];
-    s.speaker = label?.id ?? null;
-    s.speaker_name = label?.name ?? null;
-  });
-  const speakerCount = new Set(labels.filter(Boolean).map((l) => l.id)).size;
-  log.push(`Speakers: ${speakerCount} found, ${labels.filter((l) => l === null).length} turns unlabeled`);
 
   const merged = mergeSegments(segments, policy.merge);
   return {

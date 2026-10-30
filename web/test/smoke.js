@@ -6,7 +6,7 @@ import * as T from '@huggingface/transformers';
 import wavefile from 'wavefile';
 import { loadModels } from '../models.js';
 import { runPipeline } from '../pipeline.js';
-import { DEFAULT_POLICY, SAMPLE_RATE, toMarkdown } from '../harness.js';
+import { DEFAULT_POLICY, SAMPLE_RATE, toMarkdown, normalizeText } from '../harness.js';
 
 const BASE = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main';
 
@@ -53,13 +53,13 @@ console.log(log.join('\n'));
 console.log(timings);
 console.log(toMarkdown(transcript));
 
-const text = transcript.segments.map((s) => s.text).join(' ').toLowerCase();
+const text = normalizeText(transcript.segments.map((s) => s.text).join(' '));
 const speakers = new Set(transcript.segments.map((s) => s.speaker).filter(Boolean));
 const jfkSpeakers = new Set(transcript.segments.filter((s) => s.end <= jfk.length / SAMPLE_RATE + 0.5).map((s) => s.speaker));
 const mlkSpeakers = new Set(transcript.segments.filter((s) => s.start >= jfk.length / SAMPLE_RATE + 1).map((s) => s.speaker));
-check(text.includes('ask not'), 'JFK words transcribed');
+check(text.includes('ask not what your country'), 'JFK words transcribed');
 check(text.includes('dream'), 'MLK words transcribed');
 check(transcript.segments.every((s) => s.lang === 'en'), 'every segment routed as English');
 check(transcript.segments.every((s) => s.producer === 'en'), 'English specialist handled everything');
-check(speakers.size >= 2, `at least two speakers found (${speakers.size})`);
+check(speakers.size === 2, `exactly two speakers found (${speakers.size})`);
 check([...jfkSpeakers].every((s) => !mlkSpeakers.has(s)), 'JFK and MLK never share a speaker label');

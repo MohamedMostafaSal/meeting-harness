@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_POLICY, windows, evenSplit, buildTurns, route, agglomerate, assignSpeakers,
   hallucinationReason, mergeSegments, wordErrorRate, characterErrorRate, normalizeText,
-  toEvents, toMarkdown, similarity,
+  toEvents, toMarkdown, similarity, groupUtterances,
 } from '../harness.js';
 
 const policy = DEFAULT_POLICY.router;
@@ -57,12 +57,37 @@ test('buildTurns: silence dropped, flicker absorbed, overlap flagged, chunks res
     { start: 10, end: 12, cls: 2, chunk: 1 }, // same class id, new chunk → new turn
   ];
   const turns = buildTurns(raw, DEFAULT_POLICY.turns);
-  assert.deepEqual(turns, [
+  assert.deepEqual(turns.map(({ start, end, overlap }) => ({ start, end, overlap })), [
     { start: 1, end: 6, overlap: false },
     { start: 6, end: 7, overlap: true },
     { start: 7, end: 10, overlap: false },
     { start: 10, end: 12, overlap: false },
   ]);
+});
+
+test('buildTurns bridges short pauses within one speaker in one chunk', () => {
+  const raw = [
+    { start: 0, end: 2, cls: 1, chunk: 0 },
+    { start: 2, end: 2.6, cls: 0, chunk: 0 },  // short pause → bridged
+    { start: 2.6, end: 5, cls: 1, chunk: 0 },
+    { start: 5, end: 7, cls: 0, chunk: 0 },    // long pause → new turn
+    { start: 7, end: 9, cls: 1, chunk: 0 },
+    { start: 9, end: 9.5, cls: 0, chunk: 0 },  // short pause, but another speaker follows
+    { start: 9.5, end: 10, cls: 2, chunk: 0 },
+  ];
+  const turns = buildTurns(raw, DEFAULT_POLICY.turns);
+  assert.deepEqual(turns.map((t) => [t.start, t.end, t.cls]), [[0, 5, 1], [7, 9, 1], [9.5, 10, 2]]);
+});
+
+test('groupUtterances joins the same speaker across small gaps only', () => {
+  const t = (start, end, overlap = false) => ({ start, end, overlap });
+  const A = { id: 'S1' }, B = { id: 'S2' };
+  const out = groupUtterances(
+    [t(0, 2), t(2.5, 4), t(4.2, 5), t(5.1, 6, true), t(9, 10), t(10.5, 11), t(11.2, 12)],
+    [A, A, B, A, A, null, null],
+    DEFAULT_POLICY.utterances);
+  assert.deepEqual(out.map((u) => [u.start, u.end, u.label?.id ?? null]),
+    [[0, 4, 'S1'], [4.2, 5, 'S2'], [5.1, 6, 'S1'], [9, 10, 'S1'], [10.5, 11, null], [11.2, 12, null]]);
 });
 
 test('clustering groups voices in order of first appearance', () => {

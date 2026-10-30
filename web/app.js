@@ -216,7 +216,7 @@ function showProgress(on) {
 }
 
 function showStage({ stage, done, total }) {
-  $('stage').textContent = total ? `${stage}: turn ${done + 1} of ${total}` : stage;
+  $('stage').textContent = total ? `${stage}: utterance ${done + 1} of ${total}` : stage;
   if (total) $('stage-bar').value = done / total;
   else $('stage-bar').removeAttribute('value');
 }

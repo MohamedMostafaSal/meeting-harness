@@ -22,8 +22,15 @@ export const DEFAULT_POLICY = {
   turns: {
     // Segmentation flicker shorter than this is absorbed into its neighbour.
     minSegment: 0.3,
+    // Pauses up to this long inside one speaker's speech don't end their turn.
+    maxPause: 0.8,
     // Whisper reads at most 30 s at a time.
     maxTurn: 28,
+  },
+  utterances: {
+    // Consecutive turns by the same speaker are transcribed together when this close.
+    maxGap: 1.0,
+    maxDuration: 28,
   },
   merge: {
     maxGap: 0.6,
@@ -68,7 +75,7 @@ export const roundMs = (seconds) => Math.round(seconds * 1000) / 1000;
  * whose classes are 0 = silence, 1–3 = one speaker, 4–6 = two speakers at once.
  * Speaker classes are local to each 10 s chunk, so they only join within a chunk.
  */
-export function buildTurns(raw, { minSegment, maxTurn }) {
+export function buildTurns(raw, { minSegment, maxPause = 0, maxTurn }) {
   const sorted = [...raw].sort((a, b) => a.start - b.start);
 
   // 1. Absorb flicker into the previous segment.
@@ -96,12 +103,28 @@ export function buildTurns(raw, { minSegment, maxTurn }) {
     }
   }
 
-  // 3. Keep speech, flag overlap, split what Whisper can't read in one go.
-  const turns = [];
+  // 3. Bridge short pauses inside one speaker's speech.
+  const bridged = [];
   for (const s of joined) {
+    const pause = bridged.at(-1);
+    const before = bridged.at(-2);
+    if (
+      pause?.cls === 0 && pause.end - pause.start <= maxPause &&
+      before && before.cls === s.cls && before.chunk === s.chunk
+    ) {
+      bridged.pop();
+      before.end = s.end;
+    } else {
+      bridged.push(s);
+    }
+  }
+
+  // 4. Keep speech, flag overlap, split what Whisper can't read in one go.
+  const turns = [];
+  for (const s of bridged) {
     if (s.cls === 0) continue;
     for (const piece of evenSplit(s, maxTurn)) {
-      turns.push({ start: piece.start, end: piece.end, overlap: s.cls >= 4 });
+      turns.push({ start: piece.start, end: piece.end, overlap: s.cls >= 4, chunk: s.chunk, cls: s.cls });
     }
   }
   return turns;
@@ -247,6 +270,30 @@ export function assignSpeakers(embeddings, reliable, registry, policy) {
     if (best.score >= policy.clusterThreshold) result[i] = labels[best.c];
   });
   return result;
+}
+
+/**
+ * Joins consecutive turns by the same (known) speaker into utterances, so speech
+ * is transcribed in whole sentences rather than pause-to-pause scraps.
+ * `labels[i]` is turn i's speaker label or null.
+ */
+export function groupUtterances(turns, labels, { maxGap, maxDuration }) {
+  const out = [];
+  turns.forEach((turn, i) => {
+    const label = labels[i] ?? null;
+    const last = out.at(-1);
+    if (
+      last && label && last.label?.id === label.id &&
+      !last.overlap && !turn.overlap &&
+      turn.start - last.end <= maxGap &&
+      turn.end - last.start <= maxDuration
+    ) {
+      last.end = turn.end;
+    } else {
+      out.push({ start: turn.start, end: turn.end, overlap: turn.overlap, label });
+    }
+  });
+  return out;
 }
 
 // MARK: - Confidence gating (D8)
