@@ -85,16 +85,25 @@ def main():
     torch_asr = pipeline("automatic-speech-recognition", model=model_id, device="cpu")
 
     totals = {"coreml": [0, 0], "pytorch": [0, 0]}
-    lines = []
+    rows = []
     for k, clip in enumerate(samples):
         ml = coreml(args.cli, model_dir, clip, work)
         pt = torch_asr({"raw": clip["audio"], "sampling_rate": 16000}, generate_kwargs={"language": "arabic", "task": "transcribe"})["text"]
+        row = {"clip": k + 1, "seconds": len(clip["audio"]) / 16000, "reference": clip["text"], "coreml": ml, "pytorch": pt}
         for key, text in (("coreml", ml), ("pytorch", pt)):
             e, n = char_errors(clip["text"], text)
             totals[key][0] += e
             totals[key][1] += n
-        if k < 4:
-            lines += [f"**Clip {k + 1}**", f"- Reference: {clip['text']}", f"- Core ML: {ml}", f"- PyTorch: {pt}", ""]
+            row[key + "_cer"] = e / max(1, n)
+        rows.append(row)
+
+    # Per clip, so one bad clip (a repetition loop, a cut-off ending) stands out from a general drift.
+    per_clip = ["| Clip | Seconds | Core ML CER | PyTorch CER |", "|---|---|---|---|"]
+    per_clip += [f"| {r['clip']} | {r['seconds']:.1f} | {r['coreml_cer'] * 100:.1f}% | {r['pytorch_cer'] * 100:.1f}% |" for r in rows]
+    lines = []
+    for r in sorted(rows, key=lambda r: r["pytorch_cer"] - r["coreml_cer"])[:4]:
+        lines += [f"**Clip {r['clip']}** (Core ML {r['coreml_cer'] * 100:.0f}%, PyTorch {r['pytorch_cer'] * 100:.0f}%)",
+                  f"- Reference: {r['reference']}", f"- Core ML: {r['coreml']}", f"- PyTorch: {r['pytorch']}", ""]
 
     cer = {k: e / max(1, n) for k, (e, n) in totals.items()}
     summary = [
@@ -102,7 +111,8 @@ def main():
         f"{len(samples)} Egyptian Arabic clips from {DATASET} (train split, used only to compare the two formats).", "",
         "| Format | CER |", "|---|---|",
         f"| Core ML (WhisperKit, as shipped to the app) | {cer['coreml'] * 100:.1f}% |",
-        f"| PyTorch (original) | {cer['pytorch'] * 100:.1f}% |", "", "## Examples", "", *lines,
+        f"| PyTorch (original) | {cer['pytorch'] * 100:.1f}% |", "", "## Per clip", "", *per_clip, "",
+        "## Where the two differ most", "", *lines,
     ]
     text = "\n".join(summary)
     print(text)
