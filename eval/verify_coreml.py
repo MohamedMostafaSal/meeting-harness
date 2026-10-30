@@ -39,12 +39,14 @@ def clips(n, seed, out):
     from datasets import Audio, load_dataset
 
     ds = load_dataset(DATASET, split="train").cast_column("audio", Audio(sampling_rate=16000))
+    text_column = "sentence" if "sentence" in ds.column_names else [c for c in ds.column_names if c != "audio"][0]
+    print(f"columns {ds.column_names}, text from '{text_column}'")
     order = list(range(len(ds)))
     random.Random(seed).shuffle(order)
     picked = []
     for i in order:
         row = ds[i]
-        audio, text = row["audio"]["array"], (row.get("sentence") or "").strip()
+        audio, text = row["audio"]["array"], (row[text_column] or "").strip()
         if not text or not 2 <= len(audio) / 16000 <= 28:
             continue
         path = os.path.join(out, f"clip{len(picked):02d}.wav")
