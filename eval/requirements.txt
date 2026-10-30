@@ -1,0 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1
+transformers==4.46.3
+datasets==3.6.0
+soundfile==0.12.1
+librosa==0.10.2.post1
+numpy==1.26.4
