@@ -174,3 +174,30 @@ test('normalizeLevel raises quiet speech to about -20 dBFS without clipping', ()
   assert.ok(Math.max(...normalizeLevel(loud).audio.map(Math.abs)) <= 0.98, 'never clips');
   assert.equal(normalizeLevel(new Float32Array(16000)).gainDb, 0, 'silence is left alone');
 });
+
+test('liveStep commits at a pause, drafts while speaking, skips silence', async () => {
+  const { liveStep } = await import('../harness.js');
+  const rate = 16000;
+  const speech = (s) => Float32Array.from({ length: s * rate }, (_, i) => 0.1 * Math.sin(i / 7));
+  const silence = (s) => new Float32Array(s * rate);
+  const join = (...parts) => { const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
+
+  // Under a second: wait.
+  assert.equal(liveStep({ sentenceStart: 0, lastDraftAt: 0 }, rate / 2, speech(1).subarray(0, rate / 2), 0).action, 'wait');
+  // 3 s of talking, still talking: a draft.
+  let a = join(speech(3));
+  let r = liveStep({ sentenceStart: 0, lastDraftAt: 0 }, a.length, a, 0);
+  assert.equal(r.action, 'draft');
+  // Talking then a 1 s pause: commit the sentence, next one starts now.
+  a = join(speech(3), silence(1));
+  r = liveStep({ sentenceStart: 0, lastDraftAt: 3 * rate }, a.length, a, 0);
+  assert.equal(r.action, 'commit');
+  assert.equal(r.state.sentenceStart, a.length);
+  // Only silence: skip ahead.
+  a = silence(3);
+  r = liveStep({ sentenceStart: 0, lastDraftAt: 0 }, a.length, a, 0);
+  assert.equal(r.action, 'skip');
+  // A 20 s monologue is cut even without a pause.
+  a = speech(20);
+  assert.equal(liveStep({ sentenceStart: 0, lastDraftAt: 19 * rate }, a.length, a, 0).action, 'commit');
+});

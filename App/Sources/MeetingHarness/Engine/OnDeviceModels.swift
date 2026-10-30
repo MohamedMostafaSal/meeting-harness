@@ -10,7 +10,7 @@ import WhisperKit
 
 /// M1–M4: pyannote (community-1) via SpeakerKit. Its speaker clustering is kept;
 /// the harness names speakers from the per-speaker centroids.
-final class SpeakerKitDiarizer: Diarizer, ModelLifecycle {
+final class OnDeviceDiarizer: HarnessCore.Diarizer, ModelLifecycle {
     private let folder: URL
     private var kit: SpeakerKit?
 

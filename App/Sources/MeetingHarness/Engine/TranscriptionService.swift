@@ -106,20 +106,20 @@ final class TranscriptionService {
             let model = WhisperModel(folder: folder)
             multilingual = model
             recognizers.append(WhisperRecognizer(
-                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-base", version: "coreml"), languages: [], isMultilingual: true),
+                descriptor: RecognizerDescriptor(model: HarnessCore.ModelInfo(id: "whisper-base", version: "coreml"), languages: [], isMultilingual: true),
                 model: model, forcesLanguage: true))
         }
         if let folder = models.folder(for: .english) {
             recognizers.append(WhisperRecognizer(
-                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-small.en", version: "coreml"), languages: [.english]),
+                descriptor: RecognizerDescriptor(model: HarnessCore.ModelInfo(id: "whisper-small.en", version: "coreml"), languages: [.english]),
                 model: WhisperModel(folder: folder), forcesLanguage: false))
         }
         if let folder = models.folder(for: .arabic) {
             recognizers.append(WhisperRecognizer(
-                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-small-eg", version: "coreml"), languages: [.arabic], variant: "egyptian"),
+                descriptor: RecognizerDescriptor(model: HarnessCore.ModelInfo(id: "whisper-small-eg", version: "coreml"), languages: [.arabic], variant: "egyptian"),
                 model: WhisperModel(folder: folder), forcesLanguage: true))
         }
-        let diarizer: any Diarizer = models.folder(for: .speakers).map { SpeakerKitDiarizer(folder: $0) }
+        let diarizer: any HarnessCore.Diarizer = models.folder(for: .speakers).map { OnDeviceDiarizer(folder: $0) }
             ?? NoSpeechDiarizer()
         let languageID: any LanguageIdentifier = multilingual.map { WhisperLanguageID(model: $0, allowed: languages) }
             ?? FixedLanguageID(language: languages.first ?? "en")
@@ -132,7 +132,7 @@ final class TranscriptionService {
     /// A fingerprint of the main voice in a recording, for "My voice".
     func fingerprint(ofAudioAt url: URL) async throws -> SpeakerEmbedding? {
         guard let folder = models.folder(for: .speakers) else { return nil }
-        let diarizer = SpeakerKitDiarizer(folder: folder)
+        let diarizer = OnDeviceDiarizer(folder: folder)
         defer { Task { await diarizer.unload() } }
         let samples = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
         return try await diarizer.fingerprint(of: AudioClip(samples: samples, sampleRate: 16_000))
@@ -140,7 +140,7 @@ final class TranscriptionService {
 }
 
 /// Used only when the Speakers pack is missing; runs are refused before that, so it finds nothing.
-private struct NoSpeechDiarizer: Diarizer {
+private struct NoSpeechDiarizer: HarnessCore.Diarizer {
     func diarize(_ audio: AudioClip) async throws -> Diarization { Diarization(turns: []) }
 }
 

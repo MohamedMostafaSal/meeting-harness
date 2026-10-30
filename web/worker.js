@@ -3,10 +3,31 @@
 // frees each model's memory before the next one loads (iPhone Safari crashes a
 // tab that holds every model at once).
 import * as T from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js';
-import { loadVoiceModels, loadWhisper } from './models.js';
+import { loadVoiceModels, loadWhisper, whisperModels } from './models.js';
 import { newContext, diarize, plan, transcribe, piecesFor } from './pipeline.js';
 
 T.env.allowLocalModels = false;
+
+// Live captions keep one multilingual Whisper loaded for the whole recording.
+let live = null;
+
+async function handleLive(data, onDownload) {
+  const { id, task } = data;
+  if (task === 'live-init') {
+    const { multilingual } = whisperModels(data.settings.preset);
+    live = { whisper: await loadWhisper(T, data.settings, multilingual, onDownload), allowed: data.allowed };
+    postMessage({ type: 'result', id });
+    return;
+  }
+  // Committed sentences get their language detected; drafts reuse the last one.
+  let language = data.language;
+  if (data.commit || !language) {
+    const guesses = await live.whisper.identify(data.audio, live.allowed);
+    language = guesses[0]?.language ?? language ?? live.allowed[0];
+  }
+  const { text } = await live.whisper.transcribe(data.audio, { model: 'multi', language });
+  postMessage({ type: 'result', id, text, language });
+}
 
 self.onmessage = async ({ data }) => {
   const { id, task, settings, options = {} } = data;
@@ -19,6 +40,7 @@ self.onmessage = async ({ data }) => {
   const short = (modelId) => modelId.split('/').pop();
 
   try {
+    if (task?.startsWith('live-')) return await handleLive(data, onDownload);
     if (settings.device === 'webgpu' && !('gpu' in navigator)) {
       throw new Error('This browser has no WebGPU. Switch the engine to WASM in Setup.');
     }

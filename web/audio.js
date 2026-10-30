@@ -55,6 +55,7 @@ export class Recorder {
 
   get recording() { return this.#recorder?.state === 'recording'; }
   get mimeType() { return this.#recorder?.mimeType ?? ''; }
+  get stream() { return this.#stream; }
   get elapsed() { return this.recording ? (Date.now() - this.startedAt) / 1000 : 0; }
 
   async start() {

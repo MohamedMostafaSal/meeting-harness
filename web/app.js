@@ -3,6 +3,8 @@ import { DEFAULT_POLICY, SAMPLE_RATE, normalizeLevel, timestamp, toEvents, toJSO
 import { decodeToMono16k, Recorder } from './audio.js';
 import { recognizersFor, whisperModels } from './models.js';
 import { newContext, mergeContext, piecesFor, assemble } from './pipeline.js';
+import { LiveCapture, LiveCaptioner, liveCaptionsSupported } from './live.js';
+import { DEMO_RESULT, DEMO_CAPTIONS } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
 const SAMPLE_URL = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/jfk.wav';
@@ -83,27 +85,101 @@ renderVoices();
 
 const recorder = new Recorder();
 let ticker = 0;
+let capture = null;
+let captioner = null;
+let meterFrame = 0;
 
 $('record').addEventListener('click', async () => {
+  hideError();
   try {
-    if (!recorder.recording) {
-      await recorder.start();
-      $('record').setAttribute('aria-pressed', 'true');
-      $('record-label').textContent = 'Stop';
-      ticker = setInterval(() => ($('record-time').textContent = timestamp(recorder.elapsed).replace(/^0/, '')), 250);
-    } else {
-      clearInterval(ticker);
-      $('record').setAttribute('aria-pressed', 'false');
-      $('record-label').textContent = 'Record';
-      const recordedSeconds = recorder.elapsed;
-      const mimeType = recorder.mimeType;
-      const blob = await recorder.stop();
-      await useAudio(blob, `Recording ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, { recordedSeconds, mimeType });
-    }
+    await recorder.start();
   } catch (e) {
-    showError(e.name === 'NotAllowedError' ? 'Microphone access was refused. Allow it in Settings › Safari › Microphone, then try again.' : e.message);
+    return showError(e.name === 'NotAllowedError' ? 'Microphone access was refused. Allow it in your browser settings, then try again.' : e.message);
+  }
+  $('studio').dataset.state = 'recording';
+  $('audio-ready').hidden = true;
+  $('results').hidden = true;
+  $('record-time').textContent = '00:00';
+  renderCaptions([], null);
+  ticker = setInterval(() => ($('record-time').textContent = timestamp(recorder.elapsed)), 250);
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
+
+  capture = new LiveCapture(30);
+  try { await capture.start(recorder.stream); } catch { capture = null; }
+  drawMeter();
+  if (!capture) {
+    $('live-hint').textContent = 'Live captions are unavailable in this browser. The full transcript is made when you stop.';
+  } else if (!liveCaptionsSupported()) {
+    $('live-hint').textContent = 'Live captions need more memory than iPhone browsers give a page. The full transcript is made when you stop.';
+  } else {
+    $('live-hint').textContent = 'Live captions are drafts. The full transcript, with speakers, is made when you stop.';
+    captioner = new LiveCaptioner(capture, {
+      settings: { ...settings(), preset: 'light' },
+      allowed: languages(),
+      onUpdate: renderCaptions,
+      onError: () => ($('live-hint').textContent = 'Live captions stopped. Recording continues; the full transcript is made when you stop.'),
+    });
   }
 });
+
+$('stop').addEventListener('click', async () => {
+  clearInterval(ticker);
+  cancelAnimationFrame(meterFrame);
+  captioner?.stop();
+  captioner = null;
+  capture?.stop();
+  capture = null;
+  wakeLock?.release?.().catch(() => {});
+  const recordedSeconds = recorder.elapsed;
+  const mimeType = recorder.mimeType;
+  const blob = await recorder.stop();
+  $('studio').dataset.state = 'idle';
+  const ok = await useAudio(blob, `Recording ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, { recordedSeconds, mimeType });
+  if (ok) $('run').click();
+});
+
+/** Recent input levels as mirrored bars on the night background. */
+function drawMeter() {
+  const canvas = $('meter');
+  const dpr = devicePixelRatio || 1;
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  if (canvas.width !== width * dpr) { canvas.width = width * dpr; canvas.height = height * dpr; }
+  const g = canvas.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, width, height);
+  const bars = 48, gap = 3, bar = Math.max(2, (width - gap * (bars - 1)) / bars);
+  meterLevels.push(capture ? capture.level() : demoLevel());
+  while (meterLevels.length > bars) meterLevels.shift();
+  meterLevels.forEach((level, i) => {
+    const h = Math.max(4, level * height);
+    g.fillStyle = `rgba(63, 181, 158, ${0.35 + 0.65 * (i / bars)})`;
+    g.beginPath();
+    g.roundRect?.(i * (bar + gap), (height - h) / 2, bar, h, bar / 2) ?? g.rect(i * (bar + gap), (height - h) / 2, bar, h);
+    g.fill();
+  });
+  if ($('studio').dataset.state === 'recording') meterFrame = requestAnimationFrame(drawMeter);
+}
+const meterLevels = [];
+let demoTick = 0;
+/** A plausible speech envelope, for demo mode. */
+function demoLevel() {
+  demoTick += 1;
+  const x = demoTick / 6;
+  return Math.max(0.05, 0.4 + 0.3 * Math.sin(x) * Math.cos(x * 0.37) + 0.15 * Math.sin(x * 2.3));
+}
+
+function renderCaptions(lines, draft) {
+  const nodes = [...lines.map((l) => captionNode(l, false)), ...(draft ? [captionNode(draft, true)] : [])];
+  $('captions').replaceChildren(...nodes);
+  $('captions').scrollTop = $('captions').scrollHeight;
+}
+
+function captionNode(line, isDraft) {
+  const p = el('p', `caption${isDraft ? ' draft' : ''}`, line.text);
+  p.dir = line.language === 'ar' ? 'rtl' : 'ltr';
+  if (line.language) p.lang = line.language;
+  return p;
+}
 
 $('file').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
@@ -123,6 +199,7 @@ $('sample').addEventListener('click', async () => {
   }
 });
 
+/** Decodes and normalizes audio for the pipeline. Returns false if it can't be used. */
 async function useAudio(blob, name, { recordedSeconds = null, mimeType = '' } = {}) {
   hideError();
   state.diag = { input: name, type: blob.type || mimeType || 'unknown', bytes: blob.size, recordedSeconds };
@@ -131,7 +208,8 @@ async function useAudio(blob, name, { recordedSeconds = null, mimeType = '' } = 
     decoded = await decodeToMono16k(blob);
   } catch (e) {
     state.diag.decodeError = String(e?.message ?? e);
-    return showError(`This audio could not be decoded (${state.diag.type}). Try an m4a, mp3 or wav file.`);
+    showError(`This audio could not be decoded (${state.diag.type}). Try an m4a, mp3 or wav file.`);
+    return false;
   }
   // D1: quiet phone recordings otherwise read as silence to the speech detector.
   const { audio, gainDb, speechDb } = normalizeLevel(decoded);
@@ -154,6 +232,7 @@ async function useAudio(blob, name, { recordedSeconds = null, mimeType = '' } = 
   $('audio-ready').hidden = false;
   $('run').disabled = false;
   $('run-hint').textContent = 'The first run downloads the models, which can take a few minutes.';
+  return true;
 }
 
 // MARK: - Enrollment
@@ -235,6 +314,7 @@ async function runStaged() {
     phase = `${label} · `;
     state.diag.step = label;
     breadcrumb({ status: 'running', step: label, stage: 'starting' });
+    showStage({ stage: 'Loading models' });
     try {
       const out = await runTask(message);
       if (out.ctx) mergeContext(ctx, out.ctx);
@@ -281,6 +361,12 @@ function showProgress(on) {
 
 function showStage({ stage, done, total }) {
   if (!done) breadcrumb({ stage });
+  const current = Number(/Step (\d)/.exec(phase)?.[1] ?? 0);
+  document.querySelectorAll('#steps li').forEach((li) => {
+    const n = Number(li.dataset.step);
+    li.classList.toggle('done', n < current);
+    li.classList.toggle('active', n === current);
+  });
   $('stage').textContent = phase + (total ? `${stage}: ${done + 1} of ${total}` : stage);
   if (total) $('stage-bar').value = done / total;
   else $('stage-bar').removeAttribute('value');
@@ -341,10 +427,7 @@ function renderResult() {
     const label = document.createElement('label');
     label.className = 'speaker-edit';
     label.style.setProperty('--sp', colorFor(id));
-    const tag = document.createElement('span');
-    tag.className = 'who';
-    tag.style.color = colorFor(id);
-    tag.textContent = id;
+    const tag = avatar(t.segments.find((s) => s.speaker === id)?.speaker_name || id, id);
     const input = document.createElement('input');
     input.type = 'text';
     input.id = `name-${id}`;
@@ -378,32 +461,56 @@ function renderResult() {
 
 function renderTranscript(t) {
   if (!t.segments.length) {
-    const li = document.createElement('li');
-    li.className = 'hint';
-    li.textContent = 'No speech was found in this audio. The input level is shown under Audio; open Routing decisions for details.';
+    const li = el('li', 'hint', 'No speech was found in this audio. The input level is shown with the recording; open Routing decisions for details.');
+    li.style.padding = '12px 18px';
     $('transcript').replaceChildren(li);
   } else {
-    $('transcript').replaceChildren(...t.segments.map((s) => {
-      const li = document.createElement('li');
-      li.className = 'seg';
+    const nodes = [];
+    let previous = null;
+    for (const s of t.segments) {
+      const newTurn = !previous || previous.speaker !== s.speaker || s.start - previous.end > 30;
+      const who = s.speaker_name || s.speaker || 'Speaker';
+      if (newTurn) {
+        const head = el('li', 'turn-head');
+        head.style.setProperty('--sp', colorFor(s.speaker));
+        head.append(avatar(who, s.speaker), el('span', 'who', who), el('span', 'when', timestamp(s.start)));
+        nodes.push(head);
+      }
+      const li = el('li', `seg${s.uncertain ? ' uncertain' : ''}`);
       li.style.setProperty('--sp', colorFor(s.speaker));
-      const when = el('span', 'when', timestamp(s.start));
-      const meta = el('div', 'meta');
-      meta.append(el('span', 'who', s.speaker_name || s.speaker || 'Speaker'));
-      if (s.lang) meta.append(el('span', 'tag', s.lang));
-      if (s.overlap) meta.append(el('span', 'tag warn', 'overlap'));
-      if (s.uncertain) meta.append(el('span', 'tag warn', 'uncertain'));
+      li.dataset.start = s.start;
+      li.dataset.end = s.end;
       const text = el('p', 'text', s.text);
-      text.dir = 'auto';
+      text.dir = s.lang === 'ar' ? 'rtl' : 'ltr';
       if (s.lang) text.lang = s.lang;
-      li.append(when, meta, text);
-      if (s.why) li.append(el('p', 'why', s.why));
-      li.append(el('p', 'route', `${s.producer} · language confidence ${s.conf.toFixed(2)}`));
-      return li;
-    }));
+      if (s.uncertain) text.append(el('span', 'flag', s.why ? `Unsure: ${s.why}` : 'Unsure'));
+      if (s.overlap) text.append(el('span', 'flag', 'People talking at once'));
+      li.append(text);
+      if (newTurn || s.lang !== previous?.lang) li.append(el('span', 'tag', s.lang ?? '?'));
+      li.title = `${s.producer} · language confidence ${s.conf.toFixed(2)}`;
+      li.addEventListener('click', () => { $('player').currentTime = s.start; $('player').play().catch(() => {}); });
+      nodes.push(li);
+      previous = s;
+    }
+    $('transcript').replaceChildren(...nodes);
   }
-  $('gaps').replaceChildren(...t.gaps.map((g) => el('p', 'gaps', `Not transcribed ${timestamp(g.start)}–${timestamp(g.end)}: ${g.reason}`)));
+  $('gaps').replaceChildren(...t.gaps.map((g) => el('p', 'gaps', `Not transcribed ${timestamp(g.start)}–${timestamp(g.end)} · ${g.reason}`)));
 }
+
+function avatar(name, id) {
+  const a = el('span', 'avatar', /^S\d+$/.test(name) ? name : name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase());
+  a.style.setProperty('--sp', colorFor(id));
+  a.setAttribute('aria-hidden', 'true');
+  return a;
+}
+
+// Highlight the line being played.
+$('player').addEventListener('timeupdate', () => {
+  const t = $('player').currentTime;
+  document.querySelectorAll('#transcript .seg').forEach((li) => {
+    li.classList.toggle('current', !$('player').paused && t >= +li.dataset.start && t < +li.dataset.end);
+  });
+});
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -528,3 +635,33 @@ $('copy-diag').addEventListener('click', async () => {
 addEventListener('error', (e) => showError(`Unexpected error: ${e.message}`));
 addEventListener('unhandledrejection', (e) => showError(`Unexpected error: ${e.reason?.message ?? e.reason}`));
 function hideError() { $('error').hidden = true; }
+
+// MARK: - Settings summary
+
+function updateSetupSummary() {
+  const names = { en: 'English', ar: 'Arabic', de: 'German', fr: 'French' };
+  $('setup-summary').textContent = `${languages().map((l) => names[l]).join(' + ')} · ${$('preset').value === 'light' ? 'Light' : 'Balanced'} models`;
+}
+document.querySelectorAll('#languages input, #preset').forEach((n) => n.addEventListener('change', updateSetupSummary));
+updateSetupSummary();
+
+// MARK: - Demo mode (?demo, ?demo=live) for screenshots and walkthroughs
+
+const demo = new URLSearchParams(location.search).get('demo');
+if (demo === 'live') {
+  $('studio').dataset.state = 'recording';
+  $('record-time').textContent = '12:34';
+  renderCaptions(DEMO_CAPTIONS.lines, DEMO_CAPTIONS.draft);
+  $('live-hint').textContent = 'Live captions are drafts. The full transcript, with speakers, is made when you stop.';
+  for (let i = 0; i < 48; i++) meterLevels.push(demoLevel());
+  drawMeter();
+} else if (demo !== null) {
+  state.result = structuredClone(DEMO_RESULT);
+  state.names = {};
+  $('audio-name').textContent = 'Product standup';
+  $('audio-duration').textContent = '12:34 · speech level −31 dB, raised 11 dB';
+  $('audio-ready').hidden = false;
+  $('run').disabled = false;
+  renderResult();
+  window.scrollTo(0, 0);
+}

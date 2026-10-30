@@ -502,3 +502,46 @@ export function toMarkdown(transcript) {
   }
   return lines.join('\n');
 }
+
+// MARK: - Live captions (the draft pass of "draft live, refine later")
+
+export const LIVE_POLICY = {
+  pauseSeconds: 0.6,        // this much quiet ends a sentence
+  maxSentenceSeconds: 18,   // long monologues are cut anyway
+  draftEverySeconds: 2,     // how often the sentence in progress is re-transcribed
+  silenceRms: 0.008,
+  minSeconds: 1,
+};
+
+export function rms(samples, from = 0, to = samples.length) {
+  const n = Math.max(0, to - from);
+  if (!n) return 0;
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / n);
+}
+
+/**
+ * Decides what the live captioner does next. Same rules as the iPhone app's LiveCaptioner.
+ * `state` is {sentenceStart, lastDraftAt} in absolute samples; `samples` start at `start`
+ * and run to `total`. Returns {action: 'wait'|'skip'|'commit'|'draft', state}.
+ */
+export function liveStep(state, total, samples, start, policy = LIVE_POLICY, rate = SAMPLE_RATE) {
+  const sentenceStart = Math.max(state.sentenceStart, start);
+  const length = (total - sentenceStart) / rate;
+  if (length < policy.minSeconds) return { action: 'wait', state };
+  const offset = sentenceStart - start;
+  const tail = Math.max(offset, samples.length - Math.round(policy.pauseSeconds * rate));
+  const paused = rms(samples, tail) < policy.silenceRms;
+  const hasSpeech = rms(samples, offset) >= policy.silenceRms;
+  if (!hasSpeech) {
+    return { action: 'skip', state: { ...state, sentenceStart: Math.max(sentenceStart, total - Math.round(policy.pauseSeconds * rate)) } };
+  }
+  if (paused || length >= policy.maxSentenceSeconds) {
+    return { action: 'commit', from: sentenceStart, state: { sentenceStart: total, lastDraftAt: total } };
+  }
+  if ((total - state.lastDraftAt) / rate >= policy.draftEverySeconds) {
+    return { action: 'draft', from: sentenceStart, state: { sentenceStart, lastDraftAt: total } };
+  }
+  return { action: 'wait', state: { ...state, sentenceStart } };
+}

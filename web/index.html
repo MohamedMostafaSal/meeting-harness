@@ -4,106 +4,130 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Meeting Harness</title>
-  <meta name="description" content="Prototype: multilingual, multi-speaker meeting transcription with small models, running on this device.">
+  <meta name="description" content="Multilingual, multi-speaker meeting transcription with small models, running on this device.">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-title" content="Harness">
+  <meta name="theme-color" content="#0b100e">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <main class="page">
-    <header class="masthead">
-      <h1><img src="icon.svg" alt="" width="36" height="36" class="mark">Meeting Harness</h1>
-      <p class="lede">Records a meeting and transcribes it with small models that each do one job, routed by plain rules. Everything runs on this device; no audio leaves it.</p>
-      <p class="badge-row"><span class="badge">Prototype</span><span class="badge">English · Arabic</span><span class="badge">On device</span></p>
-    </header>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="./"><img src="icon.svg" alt="" width="28" height="28"> Harness</a>
+      <nav class="topnav">
+        <a href="https://github.com/MohamedMostafaSal/meeting-harness#readme">About</a>
+        <a href="https://github.com/MohamedMostafaSal/meeting-harness/tree/master/App">iPhone app</a>
+      </nav>
+    </div>
+  </header>
 
-    <section class="panel" aria-labelledby="audio-title">
-      <h2 id="audio-title">1 · Audio</h2>
-      <div class="record-row">
-        <button id="record" class="record" type="button" aria-pressed="false">
-          <span class="dot" aria-hidden="true"></span><span id="record-label">Record</span>
+  <main class="page">
+    <section id="studio" class="studio" data-state="idle" aria-label="Recording">
+      <div class="studio-idle">
+        <h1>Meetings, transcribed on your device</h1>
+        <p class="lede">English and Egyptian Arabic, even in one sentence. Small models each do one job; plain rules decide who spoke, which language, and which model hears it. No audio leaves this device.</p>
+        <button id="record" class="record-button" type="button" aria-pressed="false">
+          <span class="record-dot" aria-hidden="true"></span>
+          <span id="record-label">Record</span>
         </button>
-        <span id="record-time" class="mono muted" aria-live="polite">0:00</span>
+        <div class="studio-links">
+          <label class="text-button" for="file">Import a recording</label>
+          <input id="file" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="visually-hidden">
+          <span aria-hidden="true">·</span>
+          <button id="sample" class="text-button" type="button">Try an English sample</button>
+        </div>
       </div>
-      <div class="row wrap">
-        <label class="button secondary" for="file">Choose audio file</label>
-        <input id="file" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="visually-hidden">
-        <button id="sample" class="button secondary" type="button">Try an English sample</button>
+
+      <div class="studio-live">
+        <div class="live-head">
+          <span class="live-dot" aria-hidden="true"></span>
+          <span>Recording</span>
+          <span id="record-time" class="mono live-clock" aria-live="off">00:00</span>
+          <span class="live-private">Stays on this device</span>
+        </div>
+        <canvas id="meter" class="meter" height="72" aria-hidden="true"></canvas>
+        <div id="captions" class="captions" aria-live="polite"></div>
+        <p id="live-hint" class="live-hint"></p>
+        <button id="stop" class="stop-button" type="button" aria-label="Stop and transcribe"><span></span></button>
       </div>
-      <p class="hint">Voice Memos recordings work: share them to Files, then choose them here.</p>
-      <div id="audio-ready" class="ready" hidden>
-        <p><strong id="audio-name">Recording</strong> · <span id="audio-duration" class="mono"></span></p>
+
+      <div id="audio-ready" class="audio-ready" hidden>
+        <div class="audio-meta">
+          <strong id="audio-name">Recording</strong>
+          <span id="audio-duration" class="mono muted"></span>
+        </div>
         <p id="audio-note" class="warn-note" hidden></p>
         <audio id="player" controls preload="metadata"></audio>
       </div>
     </section>
 
     <section class="panel" aria-labelledby="setup-title">
-      <h2 id="setup-title">2 · Setup</h2>
-
-      <fieldset class="field">
-        <legend>Meeting languages</legend>
-        <div class="chips" id="languages">
-          <label class="chip"><input type="checkbox" value="en" checked> English</label>
-          <label class="chip"><input type="checkbox" value="ar" checked> Arabic</label>
-          <label class="chip"><input type="checkbox" value="de"> German</label>
-          <label class="chip"><input type="checkbox" value="fr"> French</label>
+      <details id="setup" class="setup">
+        <summary><h2 id="setup-title">Settings</h2><span id="setup-summary" class="muted"></span></summary>
+        <fieldset class="field">
+          <legend>Meeting languages</legend>
+          <div class="chips" id="languages">
+            <label class="chip"><input type="checkbox" value="en" checked> English</label>
+            <label class="chip"><input type="checkbox" value="ar" checked> Arabic</label>
+            <label class="chip"><input type="checkbox" value="de"> German</label>
+            <label class="chip"><input type="checkbox" value="fr"> French</label>
+          </div>
+          <p class="hint">Language detection only chooses between these. German and French use the multilingual model.</p>
+        </fieldset>
+        <div class="field two">
+          <label for="preset">Models
+            <select id="preset">
+              <option value="light">Light · about 220 MB · phones and computers</option>
+              <option value="balanced">Balanced · about 450 MB · better Arabic, computers only</option>
+            </select>
+          </label>
+          <label for="device">Engine
+            <select id="device">
+              <option value="wasm">WASM · works everywhere</option>
+              <option value="webgpu">WebGPU · experimental</option>
+            </select>
+          </label>
         </div>
-        <p class="hint">Language detection only chooses between these. German and French go to the multilingual fallback.</p>
-      </fieldset>
-
-      <div class="field two">
-        <label for="preset">Models
-          <select id="preset">
-            <option value="light">Light: about 220 MB, fastest</option>
-            <option value="balanced">Balanced: about 450 MB, better Arabic (computers only)</option>
-          </select>
-        </label>
-        <label for="device">Engine
-          <select id="device">
-            <option value="wasm">WASM (works everywhere)</option>
-            <option value="webgpu">WebGPU (experimental)</option>
-          </select>
-        </label>
-      </div>
-      <p class="hint">Models download once on first use and are cached by the browser. On phones use Light: Balanced needs more memory than phone browsers give a page.</p>
-
-      <details class="field">
-        <summary>My voice <span id="voice-count" class="muted"></span></summary>
-        <p class="hint">Record about 10 seconds of yourself talking so the transcript can label you by name.</p>
-        <div class="row wrap">
-          <input id="voice-name" type="text" placeholder="Your name" autocomplete="name" aria-label="Your name">
-          <button id="voice-record" class="button secondary" type="button">Record 10 seconds</button>
+        <div class="field">
+          <h3>Known voices <span id="voice-count" class="muted"></span></h3>
+          <p class="hint">Record about 10 seconds of someone talking so transcripts name them.</p>
+          <div class="row wrap">
+            <input id="voice-name" type="text" placeholder="Name" autocomplete="name" aria-label="Name">
+            <button id="voice-record" class="button" type="button">Record 10 seconds</button>
+          </div>
+          <ul id="voices" class="voices"></ul>
         </div>
-        <ul id="voices" class="voices"></ul>
+        <details class="field sub">
+          <summary>Routing thresholds</summary>
+          <div class="sliders">
+            <label for="t-lang">Trust a language guess from <output id="t-lang-out"></output>
+              <input id="t-lang" type="range" min="0.5" max="0.95" step="0.05" value="0.75"></label>
+            <label for="t-split">Re-check mixed speech every <output id="t-split-out"></output>
+              <input id="t-split" type="range" min="1" max="5" step="0.5" value="2"></label>
+            <label for="t-cluster">Same voice from similarity <output id="t-cluster-out"></output>
+              <input id="t-cluster" type="range" min="0.5" max="0.95" step="0.01" value="0.86"></label>
+            <label for="t-enroll">Name a known voice from <output id="t-enroll-out"></output>
+              <input id="t-enroll" type="range" min="0.5" max="0.95" step="0.01" value="0.86"></label>
+          </div>
+        </details>
       </details>
-
-      <details class="field">
-        <summary>Routing thresholds</summary>
-        <div class="sliders">
-          <label for="t-lang">Trust a language guess from <output id="t-lang-out"></output>
-            <input id="t-lang" type="range" min="0.5" max="0.95" step="0.05" value="0.75"></label>
-          <label for="t-split">Re-check ambiguous speech in windows of <output id="t-split-out"></output>
-            <input id="t-split" type="range" min="1" max="5" step="0.5" value="2"></label>
-          <label for="t-cluster">Same voice from similarity <output id="t-cluster-out"></output>
-            <input id="t-cluster" type="range" min="0.5" max="0.95" step="0.01" value="0.86"></label>
-          <label for="t-enroll">Match my voice from <output id="t-enroll-out"></output>
-            <input id="t-enroll" type="range" min="0.5" max="0.95" step="0.01" value="0.86"></label>
-        </div>
-      </details>
-
-      <button id="run" class="button primary" type="button" disabled>Transcribe</button>
-      <p id="run-hint" class="hint">Record or choose audio first.</p>
+      <button id="run" class="button primary wide" type="button" disabled>Transcribe</button>
+      <p id="run-hint" class="hint center">Record, import, or try the sample. Models download once and are cached.</p>
       <p id="last-run" class="warn-note" hidden></p>
     </section>
 
     <section id="progress" class="panel" aria-live="polite" hidden>
-      <h2>Working</h2>
+      <h2>Transcribing on this device</h2>
+      <ol id="steps" class="steps">
+        <li data-step="1"><span class="step-icon" aria-hidden="true"></span><span>Who spoke</span></li>
+        <li data-step="2"><span class="step-icon" aria-hidden="true"></span><span>Which language</span></li>
+        <li data-step="3"><span class="step-icon" aria-hidden="true"></span><span>What was said</span></li>
+      </ol>
       <p id="stage" class="stage">Starting…</p>
       <progress id="stage-bar" max="1" value="0"></progress>
       <ul id="downloads" class="downloads"></ul>
@@ -115,46 +139,48 @@
       <p class="hint">To report it, use Copy diagnostics at the bottom of the page.</p>
     </section>
 
-    <section id="results" class="panel" hidden aria-labelledby="results-title">
-      <h2 id="results-title">3 · Transcript</h2>
-      <dl class="stats" id="stats"></dl>
+    <section id="results" class="panel results" hidden aria-labelledby="results-title">
+      <div class="results-head">
+        <h2 id="results-title">Transcript</h2>
+        <dl class="stats" id="stats"></dl>
+      </div>
       <div id="speakers" class="speakers"></div>
       <ol id="transcript" class="transcript"></ol>
       <div id="gaps"></div>
 
       <div class="row wrap exports">
-        <button id="copy-md" class="button secondary" type="button">Copy Markdown</button>
-        <button id="copy-jsonl" class="button secondary" type="button">Copy events (JSON Lines)</button>
-        <button id="share" class="button secondary" type="button">Save or share</button>
+        <button id="copy-md" class="button" type="button">Copy Markdown</button>
+        <button id="copy-jsonl" class="button" type="button">Copy for AI tools (JSON Lines)</button>
+        <button id="share" class="button" type="button">Save or share</button>
       </div>
       <p id="export-status" class="hint" aria-live="polite"></p>
 
-      <details class="field">
-        <summary>Time per pillar</summary>
+      <details class="field sub">
+        <summary>Time per step</summary>
         <div id="timings" class="timings"></div>
       </details>
-      <details class="field">
+      <details class="field sub">
         <summary>Routing decisions</summary>
         <pre id="log" class="log"></pre>
       </details>
-      <details class="field">
+      <details class="field sub">
         <summary>Check accuracy</summary>
         <p class="hint">Paste what was actually said. Arabic spelling variants (أ/ا, ة/ه, diacritics) are not counted as errors.</p>
         <textarea id="reference" rows="5" dir="auto" aria-label="Reference transcript"></textarea>
-        <button id="score" class="button secondary" type="button">Score</button>
+        <button id="score" class="button" type="button">Score</button>
         <p id="score-out" class="mono"></p>
       </details>
     </section>
 
-    <section class="panel" aria-labelledby="report-title">
+    <section class="panel quiet" aria-labelledby="report-title">
       <h2 id="report-title">Report a problem</h2>
       <p class="hint">Copies your device and browser, the settings, the audio's length and level, the last step reached (even if the page crashed) and any error. No audio or transcript text is included.</p>
-      <button id="copy-diag" class="button secondary" type="button">Copy diagnostics</button>
+      <button id="copy-diag" class="button" type="button">Copy diagnostics</button>
       <pre id="diag-text" class="log" hidden></pre>
     </section>
 
     <footer class="footer">
-      <p>Models: pyannote segmentation 3.0 (speech, turns, overlap), WavLM speaker verification (voices), Whisper (language and words). The Arabic slot uses general Whisper until an Egyptian model is ready for the browser.</p>
+      <p>Models: pyannote segmentation 3.0 (speech, turns, overlap), WavLM (voices), Whisper (language and words). The browser runs general Whisper; the iPhone app uses a Whisper tuned on Egyptian Arabic.</p>
       <p><a href="https://github.com/MohamedMostafaSal/meeting-harness">Source on GitHub</a> · MIT license</p>
     </footer>
   </main>
