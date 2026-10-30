@@ -1,5 +1,5 @@
 // Page logic: audio in, settings, running the pipeline phases, rendering the transcript.
-import { DEFAULT_POLICY, SAMPLE_RATE, timestamp, toEvents, toJSONLines, toMarkdown, wordErrorRate, characterErrorRate } from './harness.js';
+import { DEFAULT_POLICY, SAMPLE_RATE, normalizeLevel, timestamp, toEvents, toJSONLines, toMarkdown, wordErrorRate, characterErrorRate } from './harness.js';
 import { decodeToMono16k, Recorder } from './audio.js';
 import { recognizersFor, whisperModels } from './models.js';
 import { newContext, mergeContext, piecesFor, assemble } from './pipeline.js';
@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const SAMPLE_URL = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/jfk.wav';
 const VOICES_KEY = 'meeting-harness.voices';
 
-const state = { audio: null, audioName: '', result: null, names: {} };
+const state = { audio: null, audioName: '', result: null, names: {}, diag: {} };
 
 /**
  * Runs one task in a fresh worker and terminates it afterwards. A WebAssembly
@@ -27,7 +27,8 @@ function runTask(message) {
     };
     worker.onerror = (e) => {
       worker.terminate();
-      reject(new Error(e.message || 'The model worker could not start. Check the connection and reload.'));
+      const where = e.filename ? ` (${e.filename.split('/').pop()}:${e.lineno})` : '';
+      reject(new Error((e.message || 'The model worker stopped unexpectedly. Check the connection and reload.') + where));
     };
     worker.postMessage({ ...message, id: 1 });
   });
@@ -94,8 +95,10 @@ $('record').addEventListener('click', async () => {
       clearInterval(ticker);
       $('record').setAttribute('aria-pressed', 'false');
       $('record-label').textContent = 'Record';
+      const recordedSeconds = recorder.elapsed;
+      const mimeType = recorder.mimeType;
       const blob = await recorder.stop();
-      await useAudio(blob, `Recording ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      await useAudio(blob, `Recording ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, { recordedSeconds, mimeType });
     }
   } catch (e) {
     showError(e.name === 'NotAllowedError' ? 'Microphone access was refused. Allow it in Settings › Safari › Microphone, then try again.' : e.message);
@@ -120,16 +123,33 @@ $('sample').addEventListener('click', async () => {
   }
 });
 
-async function useAudio(blob, name) {
+async function useAudio(blob, name, { recordedSeconds = null, mimeType = '' } = {}) {
   hideError();
+  state.diag = { input: name, type: blob.type || mimeType || 'unknown', bytes: blob.size, recordedSeconds };
+  let decoded;
   try {
-    state.audio = await decodeToMono16k(blob);
-  } catch {
-    return showError('This audio could not be decoded. Try an m4a, mp3 or wav file.');
+    decoded = await decodeToMono16k(blob);
+  } catch (e) {
+    state.diag.decodeError = String(e?.message ?? e);
+    return showError(`This audio could not be decoded (${state.diag.type}). Try an m4a, mp3 or wav file.`);
   }
+  // D1: quiet phone recordings otherwise read as silence to the speech detector.
+  const { audio, gainDb, speechDb } = normalizeLevel(decoded);
+  state.audio = audio;
+  const seconds = audio.length / SAMPLE_RATE;
+  Object.assign(state.diag, { decodedSeconds: +seconds.toFixed(2), speechDb: +speechDb.toFixed(1), gainDb: +gainDb.toFixed(1) });
+
+  const notes = [];
+  if (recordedSeconds && seconds < recordedSeconds * 0.7) {
+    notes.push(`Only ${seconds.toFixed(1)} s of the ${recordedSeconds.toFixed(1)} s recording could be read.`);
+  }
+  if (!Number.isFinite(speechDb) || speechDb < -60) notes.push('This audio is almost silent. Check the microphone and record closer to the sound.');
   state.audioName = name;
   $('audio-name').textContent = name;
-  $('audio-duration').textContent = timestamp(state.audio.length / 16000);
+  $('audio-duration').textContent = `${timestamp(seconds)} · speech level ${Number.isFinite(speechDb) ? speechDb.toFixed(0) : '–∞'} dB` +
+    (gainDb > 1 ? `, raised ${gainDb.toFixed(0)} dB` : '');
+  $('audio-note').textContent = notes.join(' ');
+  $('audio-note').hidden = !notes.length;
   $('player').src = URL.createObjectURL(blob);
   $('audio-ready').hidden = false;
   $('run').disabled = false;
@@ -181,6 +201,7 @@ $('run').addEventListener('click', async () => {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* optional */ }
   const started = performance.now();
   try {
+    state.diag.settings = { ...settings(), languages: languages() };
     const result = await runStaged();
     result.wall = (performance.now() - started) / 1000;
     state.result = result;
@@ -209,21 +230,34 @@ async function runStaged() {
   const { multilingual, english } = whisperModels(config.preset);
   const ctx = newContext();
 
-  phase = 'Step 1 of 3 · ';
-  const d = await runTask({ task: 'diarize', audio, settings: config, options });
-  mergeContext(ctx, d.ctx);
+  // Errors name the step they happened in, and keep the log gathered so far.
+  const step = async (label, message) => {
+    phase = `${label} · `;
+    state.diag.step = label;
+    try {
+      const out = await runTask(message);
+      if (out.ctx) mergeContext(ctx, out.ctx);
+      return out;
+    } catch (e) {
+      state.diag.log = ctx.log;
+      throw new Error(`${label} failed: ${e.message}`);
+    }
+  };
 
-  phase = 'Step 2 of 3 · ';
-  const p = await runTask({ task: 'plan', audio, settings: config, options, utterances: d.utterances, modelId: multilingual });
-  mergeContext(ctx, p.ctx);
+  const d = await step('Step 1 of 3', { task: 'diarize', audio, settings: config, options });
+  if (!d.utterances.length) {
+    ctx.log.push('No speech found: the speech detector heard only silence or noise.');
+    return assemble({ ...options, utterances: [], pieces: [], texts: {}, duration: audio.length / SAMPLE_RATE }, ctx);
+  }
+
+  const p = await step('Step 2 of 3', { task: 'plan', audio, settings: config, options, utterances: d.utterances, modelId: multilingual });
   const texts = { ...p.texts };
 
-  phase = 'Step 3 of 3 · ';
   if (piecesFor(p.pieces, recognizersFor(config.preset), english).length) {
-    const e = await runTask({ task: 'transcribe', audio, settings: config, options, pieces: p.pieces, modelId: english });
-    mergeContext(ctx, e.ctx);
+    const e = await step('Step 3 of 3', { task: 'transcribe', audio, settings: config, options, pieces: p.pieces, modelId: english });
     Object.assign(texts, e.texts);
   }
+  state.diag.step = 'done';
   return assemble({ ...options, utterances: d.utterances, pieces: p.pieces, texts, duration: audio.length / SAMPLE_RATE }, ctx);
 }
 
@@ -343,7 +377,7 @@ function renderTranscript(t) {
   if (!t.segments.length) {
     const li = document.createElement('li');
     li.className = 'hint';
-    li.textContent = 'No speech was found in this audio.';
+    li.textContent = 'No speech was found in this audio. The input level is shown under Audio; open Routing decisions for details.';
     $('transcript').replaceChildren(li);
   } else {
     $('transcript').replaceChildren(...t.segments.map((s) => {
@@ -424,7 +458,26 @@ $('score').addEventListener('click', () => {
 // MARK: - Errors
 
 function showError(message) {
-  $('error').textContent = message;
+  state.diag.error = message;
+  $('error-text').textContent = message;
   $('error').hidden = false;
 }
+
+function diagnostics() {
+  return JSON.stringify({ app: 'meeting-harness web', userAgent: navigator.userAgent, ...state.diag }, null, 2);
+}
+
+$('copy-diag').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(diagnostics());
+    $('copy-diag').textContent = 'Copied';
+  } catch {
+    $('diag-text').textContent = diagnostics();
+    $('diag-text').hidden = false;
+  }
+});
+
+// Anything that escapes a handler still reaches the page instead of failing silently.
+addEventListener('error', (e) => showError(`Unexpected error: ${e.message}`));
+addEventListener('unhandledrejection', (e) => showError(`Unexpected error: ${e.reason?.message ?? e.reason}`));
 function hideError() { $('error').hidden = true; }

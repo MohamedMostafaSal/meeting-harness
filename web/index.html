@@ -38,6 +38,7 @@
       <p class="hint">Voice Memos recordings work: share them to Files, then choose them here.</p>
       <div id="audio-ready" class="ready" hidden>
         <p><strong id="audio-name">Recording</strong> · <span id="audio-duration" class="mono"></span></p>
+        <p id="audio-note" class="warn-note" hidden></p>
         <audio id="player" controls preload="metadata"></audio>
       </div>
     </section>
@@ -108,7 +109,11 @@
       <p class="hint">Keep this page open and the screen on. The first run downloads the models.</p>
     </section>
 
-    <section id="error" class="panel error" role="alert" hidden></section>
+    <section id="error" class="panel error" role="alert" hidden>
+      <p id="error-text"></p>
+      <button id="copy-diag" class="button secondary" type="button">Copy diagnostics</button>
+      <pre id="diag-text" class="log" hidden></pre>
+    </section>
 
     <section id="results" class="panel" hidden aria-labelledby="results-title">
       <h2 id="results-title">3 · Transcript</h2>

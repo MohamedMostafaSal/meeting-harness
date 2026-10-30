@@ -64,7 +64,9 @@ h1 .mark { width: 36px; height: 36px; border-radius: 9px; vertical-align: -7px; 
   gap: 14px;
   min-width: 0;
 }
-.panel.error { border-color: var(--rec); color: var(--rec); }
+.panel.error { border-color: var(--rec); }
+.panel.error #error-text { color: var(--rec); }
+.warn-note { font-size: 0.85rem; color: var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 6px; }
 
 .row { display: flex; gap: 10px; align-items: center; }
 .wrap { flex-wrap: wrap; }

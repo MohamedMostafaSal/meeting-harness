@@ -65,6 +65,40 @@ export function windows(range, size) {
 
 export const roundMs = (seconds) => Math.round(seconds * 1000) / 1000;
 
+// MARK: - Ingest (D1)
+
+/** Speech loudness: the 90th-percentile 100 ms RMS, in dBFS (silence doesn't drag it down). */
+export function measureLevel(audio, frame = SAMPLE_RATE / 10) {
+  const levels = [];
+  let peak = 0;
+  for (let i = 0; i + frame <= audio.length; i += frame) {
+    let energy = 0;
+    for (let j = i; j < i + frame; j++) {
+      energy += audio[j] * audio[j];
+      peak = Math.max(peak, Math.abs(audio[j]));
+    }
+    levels.push(Math.sqrt(energy / frame));
+  }
+  if (!levels.length) return { speechDb: -Infinity, peak: 0 };
+  levels.sort((a, b) => a - b);
+  const p90 = levels[Math.min(levels.length - 1, Math.floor(levels.length * 0.9))];
+  return { speechDb: p90 > 0 ? 20 * Math.log10(p90) : -Infinity, peak };
+}
+
+/**
+ * Brings speech to about −20 dBFS, without clipping and without boosting by more
+ * than 30 dB. Quiet phone recordings otherwise read as silence to the speech detector.
+ */
+export function normalizeLevel(audio, { targetDb = -20, maxGainDb = 30, ceiling = 0.98 } = {}) {
+  const { speechDb, peak } = measureLevel(audio);
+  if (!(peak > 0) || !Number.isFinite(speechDb)) return { audio, gainDb: 0, speechDb };
+  const gainDb = Math.min(targetDb - speechDb, maxGainDb, 20 * Math.log10(ceiling / peak));
+  const gain = 10 ** (gainDb / 20);
+  const out = new Float32Array(audio.length);
+  for (let i = 0; i < audio.length; i++) out[i] = audio[i] * gain;
+  return { audio: out, gainDb, speechDb };
+}
+
 // MARK: - Chunking
 
 /**

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_POLICY, windows, evenSplit, buildTurns, route, agglomerate, assignSpeakers,
   hallucinationReason, mergeSegments, wordErrorRate, characterErrorRate, normalizeText,
-  toEvents, toMarkdown, similarity, groupUtterances, quietestCut,
+  toEvents, toMarkdown, similarity, groupUtterances, quietestCut, measureLevel, normalizeLevel,
 } from '../harness.js';
 
 const policy = DEFAULT_POLICY.router;
@@ -158,4 +158,19 @@ test('quietestCut lands in the pause', () => {
   audio.fill(0, 16000 * 2, 16000 * 2 + 3200); // 200 ms of silence at 2.0 s
   const cut = quietestCut(audio, 16000, 16000 * 3);
   assert.ok(cut >= 16000 * 2 && cut <= 16000 * 2 + 3200, `cut at ${cut / 16000}s`);
+});
+
+test('normalizeLevel raises quiet speech to about -20 dBFS without clipping', () => {
+  const quiet = new Float32Array(16000 * 2);
+  for (let i = 0; i < 16000; i++) quiet[i] = 0.005 * Math.sin(i / 5); // 1 s of quiet tone, 1 s silence
+  const before = measureLevel(quiet).speechDb;
+  const { audio, gainDb } = normalizeLevel(quiet);
+  assert.ok(before < -45, `starts quiet (${before.toFixed(1)} dB)`);
+  assert.ok(Math.abs(measureLevel(audio).speechDb + 20) < 1, 'speech lands near -20 dBFS');
+  assert.ok(gainDb > 20 && gainDb <= 30);
+  assert.ok(Math.max(...audio.map(Math.abs)) <= 0.98);
+
+  const loud = new Float32Array(16000).map((_, i) => 0.99 * Math.sin(i / 5));
+  assert.ok(Math.max(...normalizeLevel(loud).audio.map(Math.abs)) <= 0.98, 'never clips');
+  assert.equal(normalizeLevel(new Float32Array(16000)).gainDb, 0, 'silence is left alone');
 });

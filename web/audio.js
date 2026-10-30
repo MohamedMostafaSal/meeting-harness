@@ -54,6 +54,7 @@ export class Recorder {
   startedAt = 0;
 
   get recording() { return this.#recorder?.state === 'recording'; }
+  get mimeType() { return this.#recorder?.mimeType ?? ''; }
   get elapsed() { return this.recording ? (Date.now() - this.startedAt) / 1000 : 0; }
 
   async start() {
@@ -66,7 +67,8 @@ export class Recorder {
     this.#chunks = [];
     this.#recorder = new MediaRecorder(this.#stream);
     this.#recorder.ondataavailable = (e) => e.data.size && this.#chunks.push(e.data);
-    this.#recorder.start(1000);
+    // No timeslice: iPhone Safari can write chunked recordings that decode only in part.
+    this.#recorder.start();
     this.startedAt = Date.now();
   }
 

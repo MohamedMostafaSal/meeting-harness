@@ -6,7 +6,7 @@ import * as T from '@huggingface/transformers';
 import wavefile from 'wavefile';
 import { loadVoiceModels, loadWhisper, whisperModels } from '../models.js';
 import { newContext, diarize, plan, transcribe, piecesFor, assemble } from '../pipeline.js';
-import { DEFAULT_POLICY, SAMPLE_RATE, toMarkdown, normalizeText } from '../harness.js';
+import { DEFAULT_POLICY, SAMPLE_RATE, toMarkdown, normalizeText, normalizeLevel } from '../harness.js';
 
 const BASE = 'https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main';
 
@@ -35,6 +35,11 @@ const pause = new Float32Array(SAMPLE_RATE * 1.5);
 const audio = new Float32Array(jfk.length + pause.length + mlk.length);
 audio.set(jfk, 0);
 audio.set(mlk, jfk.length + pause.length);
+// Same ingest as the page: loudness normalization, at the quiet level of a phone recording.
+const quietAudio = audio.map((x) => x * 0.03);
+const { audio: normalized, gainDb } = normalizeLevel(quietAudio);
+console.log(`normalized a quiet copy by +${gainDb.toFixed(1)} dB`);
+audio.set(normalized);
 
 // Same staging as the browser: one model family at a time.
 const settings = { preset: 'light', device: 'cpu' };
