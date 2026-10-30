@@ -19,6 +19,13 @@ final class TranscriptionService {
     private(set) var runs: [String: Run] = [:]
     private var queue: [String] = []
     private var working = false
+    /// While recording, queued meetings wait so live captions and the pipeline
+    /// never hold two Whisper models in memory at once.
+    var held = false {
+        didSet { if !held { Task { await drain() } } }
+    }
+    /// True while a meeting is being transcribed (models are loaded).
+    var isBusy: Bool { !runs.isEmpty }
 
     private let store: MeetingStore
     private let models: ModelManager
@@ -45,10 +52,10 @@ final class TranscriptionService {
     }
 
     private func drain() async {
-        guard !working else { return }
+        guard !working, !held else { return }
         working = true
         defer { working = false }
-        while !queue.isEmpty {
+        while !queue.isEmpty, !held {
             let id = queue.removeFirst()
             guard let meeting = store.meeting(id) else { continue }
             await run(meeting)

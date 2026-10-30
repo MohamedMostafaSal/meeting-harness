@@ -11,6 +11,7 @@ struct RecordingView: View {
     @State private var confirmDiscard = false
     @State private var started = false
     @State private var captioner: LiveCaptioner?
+    @State private var captionsDeferred = false
 
     private var recorder: Recorder { app.recorder }
     private var demo: Bool { LaunchOptions.demo }
@@ -53,8 +54,8 @@ struct RecordingView: View {
         }
         .confirmationDialog("Discard this recording?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) {
-                Task { await captioner?.stop() }
                 recorder.discard()
+                release()
                 dismiss()
             }
         }
@@ -110,7 +111,10 @@ struct RecordingView: View {
     }
 
     private var captionHint: String {
-        app.models.isReady(.multilingual)
+        if captionsDeferred {
+            return "Live captions are off while an earlier meeting finishes transcribing. Your recording is unaffected."
+        }
+        return app.models.isReady(.multilingual)
             ? "Live captions appear as people speak. The full transcript, with speakers, is made when you stop."
             : "Live captions need the Language detection model (Settings › Models). The full transcript is made when you stop."
     }
@@ -154,8 +158,14 @@ struct RecordingView: View {
         }
         do {
             try recorder.start()
-            captioner = makeCaptioner()
-            captioner?.start()
+            // Hold the queue; if a meeting is already mid-transcription, skip captions
+            // rather than load a second model next to it.
+            captionsDeferred = app.transcription.isBusy
+            app.transcription.held = true
+            if !captionsDeferred {
+                captioner = makeCaptioner()
+                captioner?.start()
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -176,15 +186,26 @@ struct RecordingView: View {
 
     private func finish() {
         if demo { dismiss(); return }
-        Task { await captioner?.stop() }
-        guard let result = recorder.stop() else { dismiss(); return }
+        guard let result = recorder.stop() else { release(); dismiss(); return }
         do {
             let meeting = try app.store.add(audioAt: result.url, duration: result.duration, move: true)
             app.transcription.enqueue(meeting)
+            release()
             dismiss()
             onFinish(meeting.id)
         } catch {
+            release()
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Frees the caption model, then lets the transcription queue run.
+    private func release() {
+        let captioner = captioner
+        let transcription = app.transcription
+        Task {
+            await captioner?.stop()
+            transcription.held = false
         }
     }
 
