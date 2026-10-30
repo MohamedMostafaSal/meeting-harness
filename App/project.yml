@@ -39,8 +39,9 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources: [Tests/MeetingHarnessTests]
+    # A standalone bundle linking the package: the app host strips the internal
+    # symbols @testable needs.
     dependencies:
-      - target: Harness
       - package: MeetingHarnessApp
         product: MeetingHarness
     settings:

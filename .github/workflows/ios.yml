@@ -42,6 +42,7 @@ jobs:
             -destination "platform=iOS Simulator,name=$DEST" -derivedDataPath build \
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO > test.log 2>&1 || true
           grep -E "error:|Test Case .*(passed|failed)|TEST (SUCCEEDED|FAILED)|Executed" test.log | sort -u | head -80 || true
+          grep -E -A3 "Undefined symbols|duplicate symbol|^ld: |  \"_" test.log | head -60 || true
           grep -q "TEST SUCCEEDED" test.log
 
   screenshots:
