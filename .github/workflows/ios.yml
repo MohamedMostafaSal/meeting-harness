@@ -20,19 +20,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Xcode version
         run: xcodebuild -version
-      - name: Resolve packages
-        run: xcodebuild -resolvePackageDependencies -scheme MeetingHarness
+      - name: Generate the Xcode app project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -list -project Harness.xcodeproj
       - name: Build for iOS Simulator
         run: |
-          xcodebuild build \
-            -scheme MeetingHarness \
-            -destination 'generic/platform=iOS Simulator' \
-            -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO | tee build.log | grep -E "error:|warning: .*MeetingHarness|BUILD (SUCCEEDED|FAILED)" || true
+          set -o pipefail
+          xcodebuild build -project Harness.xcodeproj -scheme Harness \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO > build.log 2>&1 || true
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | sort -u | head -150 || true
           grep -q "BUILD SUCCEEDED" build.log
-      - name: Show errors
-        if: failure()
-        run: grep -n "error:" build.log | head -80 || true
 
   screenshots:
     needs: build

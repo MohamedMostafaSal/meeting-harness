@@ -116,7 +116,7 @@ final class TranscriptionService {
         }
         if let folder = models.folder(for: .arabic) {
             recognizers.append(WhisperRecognizer(
-                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-small", version: "coreml"), languages: [.arabic], variant: "general"),
+                descriptor: RecognizerDescriptor(model: ModelInfo(id: "whisper-small-eg", version: "coreml"), languages: [.arabic], variant: "egyptian"),
                 model: WhisperModel(folder: folder), forcesLanguage: true))
         }
         let diarizer: any Diarizer = models.folder(for: .speakers).map { SpeakerKitDiarizer(folder: $0) }
