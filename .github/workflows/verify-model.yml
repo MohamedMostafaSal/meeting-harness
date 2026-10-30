@@ -1,0 +1,34 @@
+name: verify-model
+
+# Checks that the published Core ML model transcribes like the original PyTorch model.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to verify
+        default: egyptian-arabic-v1
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build WhisperKit's CLI
+        run: |
+          git clone --depth 1 --branch v1.1.1 https://github.com/argmaxinc/argmax-oss-swift /tmp/argmax
+          cd /tmp/argmax && swift build -c release --product argmax-cli
+      - run: pip install -r eval/requirements.txt
+      - name: Compare Core ML with PyTorch
+        run: python eval/verify_coreml.py --release "${{ inputs.release }}" --cli /tmp/argmax/.build/release/argmax-cli
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coreml-check
+          path: eval/results/coreml-check.md
