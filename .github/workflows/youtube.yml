@@ -1,0 +1,91 @@
+name: youtube
+
+# Uses a YouTube video as a test set: downloads its audio and captions, runs the web
+# harness and the iPhone app's Egyptian Arabic model on it, and scores both against the
+# captions. Audio and captions stay on the runner; only scores and transcripts are kept,
+# as a short-lived artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: YouTube link
+        required: true
+      minutes:
+        description: How much of the video to test (from the start)
+        default: '10'
+      preset:
+        description: Web models (light or balanced)
+        default: balanced
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch the video's audio and captions
+        run: |
+          pip install -q yt-dlp
+          python eval/youtube_fetch.py "${{ inputs.url }}" --out yt --minutes "${{ inputs.minutes }}"
+      - name: Run the web harness and score it
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          node test/youtube.js ../yt "${{ inputs.preset }}"
+      - name: Summary
+        if: always()
+        run: |
+          { echo "# $(python -c "import json;i=json.load(open('yt/info.json'));print(i['title'])" 2>/dev/null)"; echo
+            python -c "import json;i=json.load(open('yt/info.json'));print(f\"First {i['seconds']/60:.0f} min, scored against {i['captions']} captions ({i['language']}, {i['cues']} cues).\")" 2>/dev/null; echo
+            cat yt/score.md 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: youtube-harness
+          retention-days: 7
+          path: |
+            yt/info.json
+            yt/score.md
+            yt/harness.md
+            yt/harness.json
+            yt/side-by-side.md
+
+  iphone-model:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build WhisperKit's CLI
+        run: |
+          git clone --depth 1 --branch v1.1.1 https://github.com/argmaxinc/argmax-oss-swift /tmp/argmax
+          cd /tmp/argmax && swift build -c release --product argmax-cli
+      - name: Fetch the video's audio and captions
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          pip install -q yt-dlp
+          python eval/youtube_fetch.py "${{ inputs.url }}" --out yt --minutes "${{ inputs.minutes }}"
+      - name: Run the Core ML model and score it
+        run: python eval/youtube_coreml.py yt --cli /tmp/argmax/.build/release/argmax-cli
+      - name: Summary
+        if: always()
+        run: cat yt/score-coreml.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: youtube-iphone-model
+          retention-days: 7
+          path: |
+            yt/score-coreml.md
+            yt/coreml.txt
