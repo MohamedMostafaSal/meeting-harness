@@ -61,6 +61,9 @@ p { margin: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .warn-note { font-size: 0.86rem; color: var(--warn); background: var(--warn-bg); padding: 8px 12px; border-radius: 10px; }
 
+/* While recording, the recorder is the whole page. */
+body[data-mode="recording"] .page > :not(.studio):not(.error) { display: none; }
+
 /* MARK: Studio */
 .studio { border-radius: 22px; overflow: hidden; background: var(--card); border: 1px solid var(--rule); }
 .studio-idle { display: grid; justify-items: center; gap: 18px; padding: 36px 22px 26px; text-align: center; }
@@ -69,20 +72,23 @@ p { margin: 0; }
 .record-button { appearance: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 12px; padding: 14px 26px 14px 18px; border-radius: 999px; background: var(--record); color: #fff; font: 600 1.05rem var(--sans); box-shadow: 0 8px 22px color-mix(in srgb, var(--record) 35%, transparent); }
 .record-dot { width: 26px; height: 26px; border-radius: 50%; border: 3px solid #fff; background: var(--record); box-shadow: inset 0 0 0 3px var(--record); }
 .studio-links { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 0.92rem; }
+.key-hint { display: none; margin-top: -10px; font-size: 0.82rem; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .key-hint { display: block; } }
+kbd { font: 500 0.78rem var(--mono); padding: 1px 6px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 5px; background: var(--paper); }
 .text-button { appearance: none; background: none; border: 0; color: var(--signal); font: inherit; cursor: pointer; padding: 6px 2px; }
 
 .studio-live { display: none; background: var(--night); color: var(--night-ink); padding: 18px 20px 22px; gap: 14px; min-height: 420px; grid-template-rows: auto auto 1fr auto auto; }
 .studio[data-state="recording"] .studio-live { display: grid; }
 .studio[data-state="recording"] .studio-idle { display: none; }
 .studio[data-state="recording"] { border-color: transparent; }
-.live-head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 0.95rem; }
-.live-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff6b5f; }
-@media (prefers-reduced-motion: no-preference) { .live-dot { animation: pulse 1.2s ease-in-out infinite; } }
-@keyframes pulse { 50% { opacity: 0.3; } }
+.live-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-weight: 600; font-size: 0.95rem; }
+.live-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff6b5f; box-shadow: 0 0 0 4px rgb(255 107 95 / 0.2); }
+@media (prefers-reduced-motion: no-preference) { .live-dot { animation: pulse 1.4s ease-in-out infinite; } }
+@keyframes pulse { 50% { opacity: 0.5; } }
 .live-clock { margin-left: auto; font-size: 1.6rem; font-weight: 300; letter-spacing: 0.02em; }
 .live-private { flex-basis: 100%; font-size: 0.8rem; font-weight: 400; color: color-mix(in srgb, var(--night-ink) 55%, transparent); margin-top: -6px; }
 .meter { width: 100%; height: 72px; display: block; }
-.captions { overflow-y: auto; max-height: 300px; display: flex; flex-direction: column; gap: 12px; -webkit-mask-image: linear-gradient(transparent, #000 22%); mask-image: linear-gradient(transparent, #000 22%); padding-top: 24px; scrollbar-width: none; }
+.captions { overflow-y: auto; max-height: min(50vh, 560px); display: flex; flex-direction: column; gap: 12px; -webkit-mask-image: linear-gradient(transparent, #000 22%); mask-image: linear-gradient(transparent, #000 22%); padding-top: 24px; scrollbar-width: none; }
 .caption { font-size: 1.22rem; font-weight: 500; line-height: 1.5; color: var(--night-ink); }
 .caption:lang(ar) { font-family: var(--arabic); font-size: 1.32rem; line-height: 1.7; }
 .caption.draft { opacity: 0.5; }
@@ -177,3 +183,24 @@ progress { width: 100%; height: 6px; accent-color: var(--signal); }
 .log { margin: 0; padding: 12px; background: var(--paper); border-radius: 10px; font: 0.74rem/1.55 var(--mono); overflow-x: auto; white-space: pre; }
 
 .footer { font-size: 0.8rem; color: var(--muted); padding-inline: 4px; display: grid; gap: 6px; }
+.report > summary { cursor: pointer; color: var(--ink); font-weight: 500; width: fit-content; }
+.report[open] { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); margin-bottom: 6px; }
+.results-side, .results-main { display: grid; gap: 14px; min-width: 0; }
+
+/* MARK: Laptop and wider: a wider column, speakers beside the transcript. */
+@media (min-width: 1100px) {
+  .page, .topbar-inner { max-width: 62rem; }
+  .studio-idle { padding-block: 48px 34px; }
+  .studio-live { min-height: min(760px, calc(100vh - 110px)); padding: 22px 28px 26px; }
+  .caption { font-size: 1.4rem; }
+  .caption:lang(ar) { font-size: 1.5rem; }
+  .results { grid-template-columns: 14rem minmax(0, 1fr); column-gap: 32px; align-items: start; }
+  .results-side { position: sticky; top: 76px; display: grid; gap: 18px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  .speakers { flex-direction: column; }
+  .speaker-edit { border-radius: 14px; }
+  .speaker-edit input { width: 100%; }
+  .transcript { margin: -10px -18px 0 0; }
+  .turn-head { padding-left: 0; }
+  .seg { padding-left: 40px; }
+}

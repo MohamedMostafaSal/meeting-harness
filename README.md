@@ -91,6 +91,13 @@ The app is the ears, not the brain. It produces the transcript and publishes it 
   <img src="docs/screenshots/web-transcript-light.png" width="200" alt="Web: transcript as a conversation">
 </p>
 
+On a laptop, live captions get the whole screen while recording, and speakers sit beside the transcript:
+
+<p align="center">
+  <img src="docs/screenshots/web-laptop-live-dark.png" width="400" alt="Web on a laptop: live captions while recording">
+  <img src="docs/screenshots/web-laptop-transcript-light.png" width="400" alt="Web on a laptop: speakers beside the transcript">
+</p>
+
 ## Example
 
 Real output from the web prototype's CI run, which joins two speeches by two different people:

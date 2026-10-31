@@ -96,7 +96,7 @@ $('record').addEventListener('click', async () => {
   } catch (e) {
     return showError(e.name === 'NotAllowedError' ? 'Microphone access was refused. Allow it in your browser settings, then try again.' : e.message);
   }
-  $('studio').dataset.state = 'recording';
+  setRecording(true);
   $('audio-ready').hidden = true;
   $('results').hidden = true;
   $('record-time').textContent = '00:00';
@@ -122,6 +122,22 @@ $('record').addEventListener('click', async () => {
   }
 });
 
+/** While recording, the page shows only the recorder: settings and old results wait. */
+function setRecording(on) {
+  $('studio').dataset.state = on ? 'recording' : 'idle';
+  document.body.dataset.mode = on ? 'recording' : '';
+}
+
+// Space starts and stops a recording, unless the focus is somewhere typing or clicking.
+addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select, button, summary, audio, a, [contenteditable]')) return;
+  const recording = $('studio').dataset.state === 'recording';
+  if (!recording && ($('record').disabled || !$('progress').hidden)) return;
+  e.preventDefault();
+  $(recording ? 'stop' : 'record').click();
+});
+
 $('stop').addEventListener('click', async () => {
   clearInterval(ticker);
   cancelAnimationFrame(meterFrame);
@@ -133,7 +149,7 @@ $('stop').addEventListener('click', async () => {
   const recordedSeconds = recorder.elapsed;
   const mimeType = recorder.mimeType;
   const blob = await recorder.stop();
-  $('studio').dataset.state = 'idle';
+  setRecording(false);
   const ok = await useAudio(blob, `Recording ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, { recordedSeconds, mimeType });
   if (ok) $('run').click();
 });
@@ -223,16 +239,30 @@ async function useAudio(blob, name, { recordedSeconds = null, mimeType = '' } = 
   }
   if (!Number.isFinite(speechDb) || speechDb < -60) notes.push('This audio is almost silent. Check the microphone and record closer to the sound.');
   state.audioName = name;
+  state.result = null;
+  $('results').hidden = true;
   $('audio-name').textContent = name;
   $('audio-duration').textContent = `${timestamp(seconds)} · speech level ${Number.isFinite(speechDb) ? speechDb.toFixed(0) : '–∞'} dB` +
     (gainDb > 1 ? `, raised ${gainDb.toFixed(0)} dB` : '');
   $('audio-note').textContent = notes.join(' ');
   $('audio-note').hidden = !notes.length;
+  $('player').hidden = true;
   $('player').src = URL.createObjectURL(blob);
   $('audio-ready').hidden = false;
-  $('run').disabled = false;
+  setRunButton(false);
   $('run-hint').textContent = 'The first run downloads the models, which can take a few minutes.';
   return true;
+}
+
+// The player appears once it knows the audio's length, never as an empty 0:00 / 0:00.
+$('player').addEventListener('loadedmetadata', () => ($('player').hidden = false));
+
+/** Before a run, Transcribe is the next step; after one, it becomes a quiet "Transcribe again". */
+function setRunButton(done) {
+  $('run').disabled = false;
+  $('run').textContent = done ? 'Transcribe again' : 'Transcribe';
+  $('run').classList.toggle('primary', !done);
+  $('run-hint').hidden = done;
 }
 
 // MARK: - Enrollment
@@ -291,7 +321,7 @@ $('run').addEventListener('click', async () => {
   } finally {
     wakeLock?.release?.().catch(() => {});
     showProgress(false);
-    $('run').disabled = false;
+    setRunButton(Boolean(state.result));
   }
 });
 
@@ -411,15 +441,16 @@ function renderResult() {
   const stats = [
     ['Audio', timestamp(duration)],
     ['Processing', `${wall.toFixed(0)} s`],
-    ['Speed', `${(duration / wall).toFixed(2)}× real time`],
+    ['Speed', speed(duration / wall), 'times faster than real time'],
     ['Speakers', String(speakerIds.length)],
     ['Languages', langs.join(' + ') || '–'],
   ];
-  $('stats').replaceChildren(...stats.map(([k, v]) => {
+  $('stats').replaceChildren(...stats.map(([k, v, title]) => {
     const div = document.createElement('div');
     div.innerHTML = '<dt></dt><dd></dd>';
     div.firstChild.textContent = k;
     div.lastChild.textContent = v;
+    if (title) div.title = title;
     return div;
   }));
 
@@ -457,6 +488,11 @@ function renderResult() {
   $('log').textContent = log.join('\n');
   $('results').hidden = false;
   $('results').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+
+/** "22×", "3.4×", "0.6×": enough digits to compare, no more. */
+function speed(x) {
+  return `${x >= 10 ? Math.round(x) : x.toFixed(1)}×`;
 }
 
 function renderTranscript(t) {
@@ -591,8 +627,9 @@ function breadcrumb(update) {
   $('last-run').textContent =
     `The last run stopped during ${last.step} (${last.stage}) with ${last.preset} models on ${last.seconds ?? '?'} s of audio. ` +
     'The browser most likely ran out of memory and closed the page. Use Light models or a shorter recording, ' +
-    'and tap Copy diagnostics below to report it.';
+    'and use Report a problem at the bottom of the page.';
   $('last-run').hidden = false;
+  $('report').open = true;
   $('error-text').textContent = 'Previous run crashed.';
   $('error').hidden = false;
   breadcrumb({ status: 'reported' });
@@ -635,6 +672,7 @@ $('copy-diag').addEventListener('click', async () => {
 addEventListener('error', (e) => showError(`Unexpected error: ${e.message}`));
 addEventListener('unhandledrejection', (e) => showError(`Unexpected error: ${e.reason?.message ?? e.reason}`));
 function hideError() { $('error').hidden = true; }
+$('open-report').addEventListener('click', () => ($('report').open = true));
 
 // MARK: - Settings summary
 
@@ -649,7 +687,7 @@ updateSetupSummary();
 
 const demo = new URLSearchParams(location.search).get('demo');
 if (demo === 'live') {
-  $('studio').dataset.state = 'recording';
+  setRecording(true);
   $('record-time').textContent = '12:34';
   renderCaptions(DEMO_CAPTIONS.lines, DEMO_CAPTIONS.draft);
   $('live-hint').textContent = 'Live captions are drafts. The full transcript, with speakers, is made when you stop.';
@@ -661,7 +699,7 @@ if (demo === 'live') {
   $('audio-name').textContent = 'Product standup';
   $('audio-duration').textContent = '12:34 · speech level −31 dB, raised 11 dB';
   $('audio-ready').hidden = false;
-  $('run').disabled = false;
+  setRunButton(true);
   renderResult();
   window.scrollTo(0, 0);
 }

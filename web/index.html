@@ -35,6 +35,7 @@
           <span class="record-dot" aria-hidden="true"></span>
           <span id="record-label">Record</span>
         </button>
+        <p class="key-hint">or press <kbd>Space</kbd></p>
         <div class="studio-links">
           <label class="text-button" for="file">Import a recording</label>
           <input id="file" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac" class="visually-hidden">
@@ -62,7 +63,7 @@
           <span id="audio-duration" class="mono muted"></span>
         </div>
         <p id="audio-note" class="warn-note" hidden></p>
-        <audio id="player" controls preload="metadata"></audio>
+        <audio id="player" controls preload="metadata" hidden></audio>
       </div>
     </section>
 
@@ -136,15 +137,18 @@
 
     <section id="error" class="panel error" role="alert" hidden>
       <p id="error-text"></p>
-      <p class="hint">To report it, use Copy diagnostics at the bottom of the page.</p>
+      <p class="hint">To report it, open <a href="#report" id="open-report">Report a problem</a> at the bottom of the page.</p>
     </section>
 
     <section id="results" class="panel results" hidden aria-labelledby="results-title">
-      <div class="results-head">
-        <h2 id="results-title">Transcript</h2>
-        <dl class="stats" id="stats"></dl>
+      <div class="results-side">
+        <div class="results-head">
+          <h2 id="results-title">Transcript</h2>
+          <dl class="stats" id="stats"></dl>
+        </div>
+        <div id="speakers" class="speakers"></div>
       </div>
-      <div id="speakers" class="speakers"></div>
+      <div class="results-main">
       <ol id="transcript" class="transcript"></ol>
       <div id="gaps"></div>
 
@@ -170,16 +174,16 @@
         <button id="score" class="button" type="button">Score</button>
         <p id="score-out" class="mono"></p>
       </details>
-    </section>
-
-    <section class="panel quiet" aria-labelledby="report-title">
-      <h2 id="report-title">Report a problem</h2>
-      <p class="hint">Copies your device and browser, the settings, the audio's length and level, the last step reached (even if the page crashed) and any error. No audio or transcript text is included.</p>
-      <button id="copy-diag" class="button" type="button">Copy diagnostics</button>
-      <pre id="diag-text" class="log" hidden></pre>
+      </div>
     </section>
 
     <footer class="footer">
+      <details id="report" class="report">
+        <summary>Report a problem</summary>
+        <p class="hint">Copies your device and browser, the settings, the audio's length and level, the last step reached (even if the page crashed) and any error. No audio or transcript text is included.</p>
+        <button id="copy-diag" class="button" type="button">Copy diagnostics</button>
+        <pre id="diag-text" class="log" hidden></pre>
+      </details>
       <p>Models: pyannote segmentation 3.0 (speech, turns, overlap), WavLM (voices), Whisper (language and words). The browser runs general Whisper; the iPhone app uses a Whisper tuned on Egyptian Arabic.</p>
       <p><a href="https://github.com/MohamedMostafaSal/meeting-harness">Source on GitHub</a> · MIT license</p>
     </footer>
