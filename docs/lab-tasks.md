@@ -13,7 +13,9 @@ service. Keep test audio and captions (`yt/`, `yt-testset.zip`) out of git.
 
 ---
 
-## 1. YouTube test set and the current harness on it (open)
+## 1. YouTube test set and the current harness on it (done)
+
+Done 2026-10-31: CER 140.8% (Balanced) and 275.8% (Light) against automatic captions, mostly repetition loops; about 65–70% with loops collapsed. Results: [eval/results/youtube-testset-2026-10-31.md](../eval/results/youtube-testset-2026-10-31.md).
 
 Lab brief step 1. Run `eval/youtube_test.sh "https://youtu.be/dkeu6gi3mAc" 10 ar balanced` (Git Bash,
 or its steps by hand). Report `yt/info.json`, `yt/score.md`, and 3 short excerpts from
