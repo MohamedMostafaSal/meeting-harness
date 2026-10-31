@@ -51,6 +51,20 @@ A second run added Core ML on the CPU and GPU, and the original model in float16
   its source). The app now passes the same non-speech list OpenAI's Whisper uses, built from the
   tokenizer, plus `suppressBlank`; the check now runs the CLI with the model's own list to confirm.
 
+## Result with the fix
+
+Third run, with the model's 88 non-speech tokens suppressed, the way the app now decodes:
+
+| Setup | CER |
+|---|---|
+| Core ML, the app's decoding (non-speech tokens suppressed) | **41.6%** |
+| Core ML, without suppression | 47.7% |
+| PyTorch float16 | 42.0% |
+| PyTorch float32 (original) | 39.3% |
+
+Clip 8 goes from 95.6% to 32.0%, the same as PyTorch. The iPhone model is now within half a point of
+the original model at the same precision; the remaining 2.3 points against float32 are float16 (clip 9).
+
 ## What the harness does about it
 
 The hallucination guard (a deterministic rule, in both the Swift core and the web app) now also flags
