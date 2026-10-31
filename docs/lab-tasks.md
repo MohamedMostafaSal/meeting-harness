@@ -41,14 +41,7 @@ and `yt/cues.json`.
 
 Write it as `eval/results/youtube-routing-2026-10-31.md`.
 
-## 3. Current live captions, measured briefly (open)
-
-Lab brief step 2, shortened: the batch numbers already show the cost. Serve `web/`, record in Chrome
-while **3 minutes** of the video play (from 03:00, the cleanest minute, then 05:00, the worst),
-**Light** only. Report: delay from a sentence ending to its committed caption (a few examples),
-CPU in Task Manager, whether captions loop, and whether the page stays responsive.
-
-## 4. faster-whisper on the same 10 minutes (open)
+## 3. faster-whisper on the same 10 minutes (open, do this next)
 
 Lab brief step 3, first candidate. Same audio, same scoring (`web/test/captions.js` or
 `eval/score_models.py`), plus `eval/lab/loop_stats.mjs` for loops. Runs:
@@ -62,4 +55,31 @@ Lab brief step 3, first candidate. Same audio, same scoring (`web/test/captions.
 For each: CER and WER (raw, and with loops collapsed and tags removed, as in task 1), loop words,
 processing time and real-time factor, peak memory. A vs task 1's Balanced separates runtime and
 decoding from the model; B vs A shows the Egyptian model; C shows whether stopping loops during
-decoding works. Write it as `eval/results/faster-whisper-2026-10-31.md`.
+decoding works.
+
+Then, because task 2 showed routing and loops interact, two runs on **the harness's own pieces** (cut
+`yt/audio.wav` by the Balanced pieces from the routing log, or by the 142 segments if the pieces
+can't be recovered; pad each 0.2 s on both sides):
+
+| Run | Model | Settings |
+|---|---|---|
+| D | as C | every piece forced to Arabic (what "never English under 2 s" would do, taken to the limit) |
+| E | as C | as D, but skip pieces whose `no_speech_prob` (first segment) is above 0.6 |
+
+For D and E: loop words, CER against the captions (pieces joined in time order), and for the 18
+non-speech-tag pieces and the 4 real-English ones from task 2, what each run wrote. Also give the
+`no_speech_prob` distribution for the non-speech pieces vs the rest: that tells us whether Whisper's
+own no-speech score can be the non-speech gate.
+
+Write it as `eval/results/faster-whisper-2026-10-31.md`.
+
+## 4. Current live captions, measured briefly (deferred)
+
+Lab brief step 2, shortened: the batch numbers already show the cost. Serve `web/`, record in Chrome
+while **3 minutes** of the video play (from 03:00, the cleanest minute, then 05:00, the worst),
+**Light** only. Report: delay from a sentence ending to its committed caption (a few examples),
+CPU in Task Manager, whether captions loop, and whether the page stays responsive.
+
+Deferred: task 1 and 2 show the problems are in the pipeline itself, not only in live captions.
+Will come back once the recognizer and the gates are chosen.
+
