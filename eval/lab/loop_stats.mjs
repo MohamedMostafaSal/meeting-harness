@@ -42,8 +42,9 @@ for (const preset of presets) {
   console.log(preset, {
     words, removed, loopShare: +(removed / words).toFixed(3),
     loopSegments: looped.length, loopSegmentsUncertain: looped.filter((x) => x.s.uncertain).length,
-    medianLoopSeconds: +lengths[lengths.length >> 1].toFixed(1),
+    medianLoopSeconds: +(lengths[lengths.length >> 1] ?? 0).toFixed(1),
     labeledEnglish: transcript.segments.filter((s) => s.lang === 'en').length, segments: segments.length,
+    wer: +wordErrorRate(ref, raw).rate.toFixed(3),
     cer: +characterErrorRate(ref, raw).rate.toFixed(3),
     cerCollapsed: +characterErrorRate(ref, collapsed).rate.toFixed(3),
     cerCollapsedClean: +characterErrorRate(clean(ref), clean(collapsed)).rate.toFixed(3),

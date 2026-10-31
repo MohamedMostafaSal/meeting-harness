@@ -41,7 +41,9 @@ and `yt/cues.json`.
 
 Write it as `eval/results/youtube-routing-2026-10-31.md`.
 
-## 3. faster-whisper and Meetily's settings on the same 10 minutes (open, do this next)
+## 3. faster-whisper and Meetily's settings on the same 10 minutes (done)
+
+Done 2026-10-31: repetition limits on the Egyptian model (run C) gave 42.6% CER, no loops and 0.29x the audio length; `no_speech_prob` can't be its non-speech gate, and Meetily's setup doesn't beat C. Results: [eval/results/faster-whisper-2026-10-31.md](../eval/results/faster-whisper-2026-10-31.md).
 
 Lab brief step 3, first candidate. Same audio, same scoring (`web/test/captions.js` or
 `eval/score_models.py`), plus `eval/lab/loop_stats.mjs` for loops. Runs:
