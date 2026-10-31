@@ -22,7 +22,9 @@ or its steps by hand). Report `yt/info.json`, `yt/score.md`, and 3 short excerpt
 `yt/side-by-side.md` that show the typical errors. Then run it again with `light` and report that
 score too.
 
-## 2. Why Arabic went to the English model, and why 33 speakers (open)
+## 2. Why Arabic went to the English model, and why 33 speakers (done)
+
+Done 2026-10-31: the English route is mostly clips under 2 s (only 4 real English segments), a stricter threshold doesn't fix it, loops are on the Arabic path, and the 33 is mostly tiny clusters. Results: [eval/results/youtube-routing-2026-10-31.md](../eval/results/youtube-routing-2026-10-31.md).
 
 No new model runs: use the Balanced and Light `harness.json` from task 1 (routing log and segments)
 and `yt/cues.json`.
