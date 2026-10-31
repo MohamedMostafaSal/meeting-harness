@@ -3,6 +3,11 @@
 From the cloud session that built it (2026-10-31), to the session on the maintainer's laptop. Read
 this, then [lab-brief.md](lab-brief.md), then [design.md](design.md).
 
+**Scope: lab work only.** The cloud session stays the main one and owns the app, the web app, CI and
+`master`. The laptop session measures and reports: run the experiments in `lab-brief.md`, then push
+results (and any measurement scripts) to the branch `lab/live-asr`, never to `master`. Don't change
+`App/`, `Sources/`, `web/` (beyond local instrumentation that isn't committed) or the workflows.
+
 ## The project
 
 A meeting transcriber that routes work through small specialist models and deterministic rules
@@ -51,12 +56,12 @@ public repo with the web app on GitHub Pages.
    live captions)? This decides whether cloud recognizers are compared.
 2. Which live-captioning approach, once `lab-brief.md` produces numbers.
 
-## Next
+## Next (lab)
 
 Follow `lab-brief.md`: build the YouTube test set (Arabic captions), measure the current live
-captions, compare faster/streaming recognizers on the same audio, write up a recommendation in
-`eval/results/`. Don't change the app until the maintainer picks an approach. Ask before sending any
-audio to a cloud service.
+captions, compare faster/streaming recognizers on the same audio, write up the results in
+`eval/results/live-asr-<date>.md` on branch `lab/live-asr` and push it. The cloud session reads it
+from there and decides with the maintainer. Ask before sending any audio to a cloud service.
 
 ## Working notes
 
