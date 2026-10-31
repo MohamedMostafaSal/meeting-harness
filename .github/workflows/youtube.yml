@@ -1,18 +1,15 @@
 name: youtube
 
-# Uses a YouTube video as a test set: downloads its audio and captions, runs the web
-# harness and the iPhone app's Egyptian Arabic model on it, and scores both against the
-# captions. Audio and captions stay on the runner; only scores and transcripts are kept,
-# as a short-lived artifact.
+# Scores the web harness and the iPhone app's Egyptian Arabic model on a test set made from
+# a YouTube video by eval/youtube_test.sh (run on your own computer: YouTube asks cloud
+# machines to sign in, so the download happens there). Pass a direct download link to the
+# yt-testset.zip it makes. Only scores and transcripts are kept, as a short-lived artifact.
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: YouTube link
+      testset:
+        description: Direct download link to yt-testset.zip (audio.wav, cues.json, info.json)
         required: true
-      minutes:
-        description: How much of the video to test (from the start)
-        default: '10'
       preset:
         description: Web models (light or balanced)
         default: balanced
@@ -26,16 +23,13 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Fetch the video's audio and captions
-        run: |
-          pip install -q yt-dlp
-          python eval/youtube_fetch.py "${{ inputs.url }}" --out yt --minutes "${{ inputs.minutes }}"
+      - name: Get the test set
+        env:
+          TESTSET: ${{ inputs.testset }}
+        run: curl -fsSL "$TESTSET" -o testset.zip && unzip -q testset.zip -d yt && rm testset.zip
       - name: Run the web harness and score it
         working-directory: web
         run: |
@@ -44,9 +38,8 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          { echo "# $(python -c "import json;i=json.load(open('yt/info.json'));print(i['title'])" 2>/dev/null)"; echo
-            python -c "import json;i=json.load(open('yt/info.json'));print(f\"First {i['seconds']/60:.0f} min, scored against {i['captions']} captions ({i['language']}, {i['cues']} cues).\")" 2>/dev/null; echo
-            cat yt/score.md 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          python3 -c "import json;i=json.load(open('yt/info.json'));print(f\"# {i['title']}\n\nFirst {i['seconds']/60:.0f} min, scored against {i['captions']} captions ({i['language']}, {i['cues']} cues).\n\")" >> "$GITHUB_STEP_SUMMARY" || true
+          cat yt/score.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -71,11 +64,10 @@ jobs:
         run: |
           git clone --depth 1 --branch v1.1.1 https://github.com/argmaxinc/argmax-oss-swift /tmp/argmax
           cd /tmp/argmax && swift build -c release --product argmax-cli
-      - name: Fetch the video's audio and captions
-        run: |
-          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          pip install -q yt-dlp
-          python eval/youtube_fetch.py "${{ inputs.url }}" --out yt --minutes "${{ inputs.minutes }}"
+      - name: Get the test set
+        env:
+          TESTSET: ${{ inputs.testset }}
+        run: curl -fsSL "$TESTSET" -o testset.zip && unzip -q testset.zip -d yt && rm testset.zip
       - name: Run the Core ML model and score it
         run: python eval/youtube_coreml.py yt --cli /tmp/argmax/.build/release/argmax-cli
       - name: Summary

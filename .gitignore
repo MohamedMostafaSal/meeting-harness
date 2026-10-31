@@ -7,3 +7,7 @@ DerivedData/
 web/node_modules/
 App/build/
 App/Harness.xcodeproj/
+__pycache__/
+# YouTube test sets (audio and captions): keep them off the public repo
+yt/
+yt-testset.zip

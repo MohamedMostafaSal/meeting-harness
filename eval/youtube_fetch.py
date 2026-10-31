@@ -19,25 +19,35 @@ import subprocess
 import sys
 import urllib.request
 
-PREFERRED = ["ar", "en"]
+def extract(url, options, download=False):
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, **options}) as ydl:
+        info = ydl.extract_info(url, download=download)
+        if download:
+            info["_filename"] = ydl.prepare_filename(info)
+        return info
 
 
-def pick_captions(info):
-    """Returns (source, language, url) for the best json3 caption track."""
+def pick_captions(info, preferred):
+    """Returns (source, language, url) for the best json3 caption track: the preferred
+    language first (uploaded, then automatic), then anything else."""
     def json3(tracks):
-        return next((t["url"] for t in tracks if t.get("ext") == "json3"), None)
+        return next((t["url"] for t in tracks or [] if t.get("ext") == "json3"), None)
 
     manual = info.get("subtitles") or {}
-    for lang in [info.get("language"), *PREFERRED, *manual.keys()]:
-        if lang and lang in manual and json3(manual[lang]):
-            return "uploaded", lang, json3(manual[lang])
-    auto = info.get("automatic_captions") or {}
     # Automatic captions list every translation too; the original is the video's language
     # (sometimes keyed "<lang>-orig").
-    for lang in [info.get("language"), *PREFERRED]:
-        for key in (f"{lang}-orig", lang):
-            if lang and key in auto and json3(auto[key]):
-                return "automatic", lang, json3(auto[key])
+    auto = info.get("automatic_captions") or {}
+    for lang in [*preferred, info.get("language"), *manual.keys()]:
+        if not lang:
+            continue
+        if json3(manual.get(lang)):
+            return "uploaded", lang, json3(manual[lang])
+        if lang in preferred or lang == info.get("language"):
+            for key in (f"{lang}-orig", lang):
+                if json3(auto.get(key)):
+                    return "automatic", lang, json3(auto[key])
     return None, None, None
 
 
@@ -60,19 +70,18 @@ def main():
     parser.add_argument("url")
     parser.add_argument("--out", default="yt")
     parser.add_argument("--minutes", type=float, default=10)
+    parser.add_argument("--captions", default="ar", help="caption language to test against, e.g. ar or en")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    import yt_dlp
-
-    with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
-        info = ydl.extract_info(args.url, download=False)
+    info = extract(args.url, {"skip_download": True})
     print(f"{info.get('title')} ({info.get('duration')} s, language {info.get('language')})")
     print(f"uploaded captions: {sorted((info.get('subtitles') or {}).keys())}")
+    print(f"automatic captions include ar: {'ar' in (info.get('automatic_captions') or {})}")
 
-    source, lang, url = pick_captions(info)
-    if not url:
-        sys.exit("This video has no Arabic or English captions to test against.")
+    source, lang, url = pick_captions(info, [args.captions])
+    if not url or lang != args.captions:
+        sys.exit(f"This video has no '{args.captions}' captions to test against (found: {lang or 'none'}).")
     print(f"using {source} captions in '{lang}'")
 
     limit = args.minutes * 60
@@ -80,8 +89,8 @@ def main():
     cues = cues_from_json3(data, limit)
     json.dump(cues, open(os.path.join(args.out, "cues.json"), "w"), ensure_ascii=False, indent=1)
 
-    with yt_dlp.YoutubeDL({"quiet": True, "format": "bestaudio/best", "outtmpl": os.path.join(args.out, "source.%(ext)s")}) as ydl:
-        downloaded = ydl.prepare_filename(ydl.extract_info(args.url, download=True))
+    downloaded = extract(args.url, {"format": "bestaudio/best", "outtmpl": os.path.join(args.out, "source.%(ext)s")},
+                         download=True)["_filename"]
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", downloaded, "-t", str(limit),
                     "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", os.path.join(args.out, "audio.wav")], check=True)
     os.remove(downloaded)
