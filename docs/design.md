@@ -228,6 +228,43 @@ This is the "harness" itself, and it's where most of the product value is.
 
 ---
 
+## Hard budgets and gates (planned, after the lab results)
+
+Requirement from the maintainer: hard memory limits and hard processing gates, so the app stays fast
+at almost any scale (a 3-hour meeting, 10 speakers, a 4-year-old phone). "Hard" means enforced by
+code and checked by tests, not a guideline. Today the design names these pillars (D2, D8, D12, D13,
+D15) but the code doesn't enforce them: for example, the iPhone app loads a whole recording into
+memory (about 230 MB for an hour).
+
+**Memory: flat in meeting length**
+
+| Budget | Gate |
+|---|---|
+| Audio | Never hold a whole meeting: read and process it in fixed windows from disk; live audio stays in a fixed ring buffer. |
+| Models | A per-device resident budget (in MB). The registry admits a load only if it fits, and frees the least recently used model first; "one model at a time" becomes a special case. |
+| Meeting state | Segments go to the append-only event log on disk as they're final; memory keeps only a bounded window. Speaker voices are capped (merge or drop the least-heard). |
+| Web | One worker per phase (already), plus a per-worker heap ceiling that stops a phase before the tab is killed. |
+
+**Processing: gates that degrade instead of falling behind**
+
+| Gate | Behaviour |
+|---|---|
+| Real-time factor | Each stage measures its speed. Live work that falls behind real time drops drafts first (never committed sentences), then moves to a cheaper model. |
+| Bounded queues | Every queue has a size limit and back-pressure; nothing grows with meeting length. |
+| Retry and escalation budget | The check, retry and escalate loop gets a fixed number of attempts and a time limit per segment. |
+| Device state | Thermal state, low-power mode and battery gate the heavy refine work (run it later, or on a cheaper tier). |
+| Long meetings | Diarization and language ID work window by window with carried-over state (speaker voices, language priors), so cost per minute stays the same at hour three as at minute one. |
+
+**Proof**
+
+- Every budget is a number in the policy, and the code accounts against it.
+- CI runs a scripted 3-hour, 10-speaker meeting and asserts peak memory stays flat and every
+  queue stays bounded.
+- The evaluation sets act as a gate on any model or threshold change.
+
+Lab results come first: they set the actual numbers (how fast each recognizer runs, how much memory
+it needs) and decide which recognizer the live path uses.
+
 ## How a segment flows (example)
 
 ```
