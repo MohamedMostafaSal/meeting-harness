@@ -60,7 +60,7 @@ These are rough, because a segment counts toward the minute holding its midpoint
   is already the default, so B also had it; only `no_repeat_ngram_size` and `repetition_penalty` differ.
 - **C vs A is close.** C is 2 points better on CER, A 1 point better on WER, and C has 2.3× the speed. That's a thin
   case for the Egyptian model on quality alone against automatic captions; `whisper-small-eg` had a clearer lead on
-  MGB-3 in `eval/results/egyptian-asr-2026-10-30.md`.
+  MGB-3 (30.9% vs 39.6% CER, `eval/results/egyptian-asr-2026-10-30.md`).
 - **Warning on C:** minute 3, the cleanest speech, goes from 28% (B) to 42%, with 112 words against the captions'
   137 and B's 146. That minute has rhymed, repetitive speech, so the limits may be cutting real text. This is
   one minute and wasn't investigated.
@@ -201,7 +201,7 @@ Proposals for the cloud session; nothing here has been built into the app.
 
 - One video against automatic captions, in fast, noisy, comedic speech. The ranking of A and C could change on real meetings
   or with hand-made captions.
-- One run of each, on a laptop that was otherwise in use lightly, with small downloads during B, so treat times as rough.
+- One run of each, on a laptop that may have been in use for other things, with small downloads during B, so treat times as rough.
   Times exclude model loading except where noted; F's and G's include VAD (2 s).
 - `tokenizer.json` for the Egyptian CTranslate2 model was generated from its own tokenizer files, because the repo has none.
 - CTranslate2 and GGML versions of the Egyptian model weren't checked against each other, and F and G differ from C in
