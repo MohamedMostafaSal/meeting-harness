@@ -58,7 +58,7 @@ public repo with the web app on GitHub Pages.
 
 ## Next (lab)
 
-Follow `lab-brief.md`: build the YouTube test set (Arabic captions), measure the current live
+Do the tasks in `lab-tasks.md` in order (they draw on `lab-brief.md`): build the YouTube test set (Arabic captions), measure the current live
 captions, compare faster/streaming recognizers on the same audio, write up the results in
 `eval/results/live-asr-<date>.md` on branch `lab/live-asr` and push it. The cloud session reads it
 from there and decides with the maintainer. Ask before sending any audio to a cloud service.
