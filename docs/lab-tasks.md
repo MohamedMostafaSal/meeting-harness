@@ -111,3 +111,30 @@ CPU in Task Manager, whether captions loop, and whether the page stays responsiv
 Deferred: task 1 and 2 show the problems are in the pipeline itself, not only in live captions.
 Will come back once the recognizer and the gates are chosen.
 
+
+## 5. Tune the repetition limits, and check against human transcripts (open)
+
+Task 3's run C (Egyptian model, faster-whisper, `no_repeat_ngram_size=3`, `repetition_penalty=1.1`) is the
+baseline. Two open questions: what the limits cost on real repeated speech (minute 3 got worse), and whether
+C beats stock `small` (run A) against **human** transcripts rather than YouTube's automatic captions.
+
+**a. Limit sweep on the same 10 minutes**, run C's setup otherwise unchanged:
+
+| `no_repeat_ngram_size` | 0 | 3 | 4 | 5 | 0 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|---|---|
+| `repetition_penalty` | 1.0 | 1.0 | 1.0 | 1.0 | 1.1 | 1.1 | 1.1 | 1.1 |
+
+(`3 / 1.1` is C; `0 / 1.0` is B.) For each: CER, loop words / words, time, and minute 3's CER and word count
+against the captions' 137. Then read minute 3 for the best two settings and say what was cut: real repeated
+words, or noise.
+
+**b. Human transcripts: MGB-3.** Run A, C, and the best setting from (a) on the 100 MGB-3 test clips that
+`eval/score_models.py` uses (`--clips 100`, its default seed; the dataset is downloadable on the laptop).
+MGB-3's transcripts are human-made, so this settles the Egyptian model vs stock `small` question. Report
+CER and WER with `score_models.py`'s Arabic normalization, loops, and time.
+
+**c. Optional, only if quick:** time the best setting on the laptop's NVIDIA GPU (GeForce 940MX) with
+faster-whisper (`device="cuda"`, `compute_type="int8"` or `int8_float32`). Skip it if CUDA doesn't work
+within a few minutes; report why.
+
+Write it as `eval/results/repetition-limits-2026-10-31.md`.
