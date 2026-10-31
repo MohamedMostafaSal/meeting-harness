@@ -41,7 +41,7 @@ and `yt/cues.json`.
 
 Write it as `eval/results/youtube-routing-2026-10-31.md`.
 
-## 3. faster-whisper on the same 10 minutes (open, do this next)
+## 3. faster-whisper and Meetily's settings on the same 10 minutes (open, do this next)
 
 Lab brief step 3, first candidate. Same audio, same scoring (`web/test/captions.js` or
 `eval/score_models.py`), plus `eval/lab/loop_stats.mjs` for loops. Runs:
@@ -70,6 +70,32 @@ For D and E: loop words, CER against the captions (pieces joined in time order),
 non-speech-tag pieces and the 4 real-English ones from task 2, what each run wrote. Also give the
 `no_speech_prob` distribution for the non-speech pieces vs the rest: that tells us whether Whisper's
 own no-speech score can be the non-speech gate.
+
+Then **Meetily's setup**, copied from Meetily v0.4.1 (MIT, github.com/Zackriya-Solutions/meeting-minutes,
+`frontend/src-tauri/src/whisper_engine/whisper_engine.rs`, `audio/vad.rs`, `audio/hardware_detector.rs`),
+as the reference for what a mature local app does about loops:
+
+| Run | Model | Setup |
+|---|---|---|
+| F | `ggml-small.bin` (whisper.cpp's multilingual small) | Meetily's import path, below |
+| G | `tawreck-hasaballah/whisper-small-eg` converted to GGML (whisper.cpp `models/convert-h5-to-ggml.py`) | as F |
+
+- **Runtime:** whisper.cpp (Meetily uses it through `whisper-rs`). The Windows release with Vulkan if it
+  runs on this laptop's GPU, otherwise the CPU build. Say which.
+- **Segmentation:** Silero VAD on the 10 minutes with positive threshold 0.50, negative threshold 0.35,
+  redemption 2000 ms (Meetily's import and re-transcribe paths), pre-speech pad 300 ms, post-speech pad
+  400 ms, minimum speech 250 ms. Transcribe each speech segment on its own.
+- **Decoding (Meetily's Windows settings):** language `ar`, beam search size 2 with patience 1.0,
+  temperature 0.2, no timestamps, suppress blank, suppress non-speech tokens, max initial timestamp 1.0,
+  entropy threshold 2.4, log-probability threshold −1.0, no-speech threshold 0.55.
+- **Cleanup after decoding** (`clean_repetitive_text`, port it): empty the text if it contains one of
+  Meetily's junk phrases (thank you for watching, thanks for watching, like and subscribe, music
+  playing, applause, laughter, um um um, uh uh uh, ah ah ah) or has 3 or fewer distinct characters and
+  more than 10 characters; if 3+ words, collapse consecutive repeats of a word to one, then collapse a
+  2–5-word phrase immediately repeated once; then empty the text if (repeated words ÷ words) > 0.7.
+
+For F and G: the same scores as A–C, **before and after the cleanup** (so we see what decoding settings do
+vs what the cleanup removes), plus how many segments the cleanup emptied and a few examples of each kind.
 
 Write it as `eval/results/faster-whisper-2026-10-31.md`.
 
