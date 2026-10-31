@@ -62,7 +62,7 @@ const lines = [
   `| Speech by language | ${Object.entries(languages).map(([l, s]) => `${l} ${timestamp(s)}`).join(', ')} |`,
   `| Segments marked uncertain | ${uncertain} of ${transcript.segments.length} |`,
   `| Gaps (not transcribed) | ${transcript.gaps.length} |`,
-  `| Processing time | ${wall.toFixed(0)} s for ${seconds.toFixed(0)} s of audio on a CI CPU |`, '',
+  `| Processing time | ${wall.toFixed(0)} s for ${seconds.toFixed(0)} s of audio on this machine |`, '',
   '| Minute | CER | Caption words | Harness words |', '|---|---|---|---|',
   ...score.windows.map((w) => `| ${timestamp(w.start)} | ${w.cer === null ? '–' : `${(w.cer * 100).toFixed(0)}%`} | ${w.refWords} | ${w.hypWords} |`),
 ];

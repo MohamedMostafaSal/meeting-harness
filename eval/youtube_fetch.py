@@ -73,6 +73,8 @@ def main():
     parser.add_argument("--captions", default="ar", help="caption language to test against, e.g. ar or en")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
+    # Windows consoles default to a legacy code page; Arabic titles would crash print().
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     info = extract(args.url, {"skip_download": True})
     print(f"{info.get('title')} ({info.get('duration')} s, language {info.get('language')})")
@@ -87,7 +89,7 @@ def main():
     limit = args.minutes * 60
     data = json.load(urllib.request.urlopen(url))
     cues = cues_from_json3(data, limit)
-    json.dump(cues, open(os.path.join(args.out, "cues.json"), "w"), ensure_ascii=False, indent=1)
+    json.dump(cues, open(os.path.join(args.out, "cues.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
     downloaded = extract(args.url, {"format": "bestaudio/best", "outtmpl": os.path.join(args.out, "source.%(ext)s")},
                          download=True)["_filename"]
@@ -98,7 +100,7 @@ def main():
     span = min(limit, info.get("duration") or limit)
     json.dump({"title": info.get("title"), "url": args.url, "duration": info.get("duration"), "seconds": span,
                "captions": source, "language": lang, "cues": len(cues)},
-              open(os.path.join(args.out, "info.json"), "w"), ensure_ascii=False, indent=1)
+              open(os.path.join(args.out, "info.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"{len(cues)} caption cues in the first {span / 60:.1f} min")
 
 

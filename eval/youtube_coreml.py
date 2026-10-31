@@ -31,8 +31,8 @@ def main():
     parser.add_argument("--release", default="egyptian-arabic-v1")
     args = parser.parse_args()
 
-    info = json.load(open(os.path.join(args.dir, "info.json")))
-    cues = json.load(open(os.path.join(args.dir, "cues.json")))
+    info = json.load(open(os.path.join(args.dir, "info.json"), encoding="utf-8"))
+    cues = json.load(open(os.path.join(args.dir, "cues.json"), encoding="utf-8"))
     work = tempfile.mkdtemp()
     model_dir = os.path.join(work, "model")
     model_id = download_release(args.release, model_dir)
@@ -43,7 +43,7 @@ def main():
            "--temperature-fallback-count", "3", "--chunking-strategy", "vad",
            "--report", "--report-path", report_dir, "--suppress-tokens", *suppress_tokens(model_id)]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
-    result = json.load(open(os.path.join(report_dir, "audio.json")))
+    result = json.load(open(os.path.join(report_dir, "audio.json"), encoding="utf-8"))
     segments = [{"start": s["start"], "end": s["end"], "text": s["text"]} for s in result.get("segments", [])]
     hyp_all = result.get("text") or " ".join(s["text"] for s in segments)
 
@@ -70,8 +70,8 @@ def main():
     ]
     text = "\n".join(lines) + "\n"
     print(text)
-    open(os.path.join(args.dir, "score-coreml.md"), "w").write(text)
-    open(os.path.join(args.dir, "coreml.txt"), "w").write(hyp_all + "\n")
+    open(os.path.join(args.dir, "score-coreml.md"), "w", encoding="utf-8").write(text)
+    open(os.path.join(args.dir, "coreml.txt"), "w", encoding="utf-8").write(hyp_all + "\n")
 
 
 if __name__ == "__main__":

@@ -22,8 +22,42 @@ or its steps by hand). Report `yt/info.json`, `yt/score.md`, and 3 short excerpt
 `yt/side-by-side.md` that show the typical errors. Then run it again with `light` and report that
 score too.
 
-## 2. Current live captions, measured (open)
+## 2. Why Arabic went to the English model, and why 33 speakers (open)
 
-Lab brief step 2. Serve `web/`, record in Chrome while the first 10 minutes of the video play, once with
-Light and once with Balanced. Report: delay from sentence end to committed caption, CPU (Task Manager),
-how often captions loop and on what audio, and the laptop's CPU/GPU model and RAM.
+No new model runs: use the Balanced and Light `harness.json` from task 1 (routing log and segments)
+and `yt/cues.json`.
+
+- **Routing.** For every segment labelled `en`: start, length, the language-ID guesses and the
+  routing decision from the log (was it a whole-utterance call or a re-check window?), the harness
+  text, and the captions at the same time. Count how many look like real English vs Arabic. Then
+  give the distribution of the language-ID confidence on those segments, and say whether a stricter
+  threshold or an Arabic prior (most of the meeting is Arabic) would have fixed them.
+- **Loops vs routing.** Of the loop segments, how many were routed `en` vs `ar`, and how long were they?
+- **Speakers.** Turns and total speech per speaker label, sorted. How many labels have under 10 s of
+  speech? Is the 33 driven by many tiny clusters (short turns, overlap, laughter) or by a few voices
+  split in many?
+
+Write it as `eval/results/youtube-routing-2026-10-31.md`.
+
+## 3. Current live captions, measured briefly (open)
+
+Lab brief step 2, shortened: the batch numbers already show the cost. Serve `web/`, record in Chrome
+while **3 minutes** of the video play (from 03:00, the cleanest minute, then 05:00, the worst),
+**Light** only. Report: delay from a sentence ending to its committed caption (a few examples),
+CPU in Task Manager, whether captions loop, and whether the page stays responsive.
+
+## 4. faster-whisper on the same 10 minutes (open)
+
+Lab brief step 3, first candidate. Same audio, same scoring (`web/test/captions.js` or
+`eval/score_models.py`), plus `eval/lab/loop_stats.mjs` for loops. Runs:
+
+| Run | Model | Settings |
+|---|---|---|
+| A | `openai/whisper-small` (CTranslate2 int8) | `language="ar"`, `vad_filter=True`, `condition_on_previous_text=False`, `beam_size=1` |
+| B | `tawreck-hasaballah/whisper-small-eg` converted with `ct2-transformers-converter --quantization int8` | as A |
+| C | as B | plus `no_repeat_ngram_size=3`, `repetition_penalty=1.1`, `compression_ratio_threshold=2.4` |
+
+For each: CER and WER (raw, and with loops collapsed and tags removed, as in task 1), loop words,
+processing time and real-time factor, peak memory. A vs task 1's Balanced separates runtime and
+decoding from the model; B vs A shows the Egyptian model; C shows whether stopping loops during
+decoding works. Write it as `eval/results/faster-whisper-2026-10-31.md`.
